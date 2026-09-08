@@ -1,0 +1,100 @@
+{
+  "name": "iceberg-explorer",
+  "displayName": "Iceberg Explorer",
+  "description": "Browse Apache Iceberg warehouses in S3-compatible storage or local file system from VS Code.",
+  "version": "0.0.1",
+  "publisher": "TBD",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "icebergExplorer",
+          "name": "Iceberg Explorer",
+          "icon": "resources/iceberg.svg"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "icebergExplorer.openSettings",
+        "title": "Configure Iceberg Explorer connection",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "icebergExplorer.testPanel",
+        "title": "Iceberg Explorer: Open Test Metadata Panel"
+      },
+      {
+        "command": "icebergExplorer.activateConnection",
+        "title": "Activate Connection",
+        "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.editConnection",
+        "title": "Edit Connection",
+        "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.deleteConnection",
+        "title": "Delete Connection",
+        "category": "Iceberg Explorer"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "icebergExplorer.openSettings",
+          "when": "view == icebergExplorer",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "icebergExplorer.editConnection",
+          "when": "view == icebergExplorer && viewItem == icebergConnection",
+          "group": "icebergConnection@1"
+        },
+        {
+          "command": "icebergExplorer.deleteConnection",
+          "when": "view == icebergExplorer && viewItem == icebergConnection",
+          "group": "icebergConnection@2"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "copy-wasm": "node -e \"const fs=require('fs'),path=require('path'),base=path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-node.cjs'));fs.mkdirSync('out',{recursive:true});['duckdb-eh.wasm','duckdb-mvp.wasm','duckdb-node.cjs','duckdb-node-eh.worker.cjs','duckdb-node-mvp.worker.cjs'].forEach(f=>fs.copyFileSync(path.join(base,f),'out/'+f));\"",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js",
+    "test:slice": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-metadata-panel.test.ts",
+    "test:slice-settings": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-settings-panel.test.ts",
+    "test:slice-query": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-query-engine.test.ts",
+    "test:slice-tree": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-tree-view.test.ts",
+    "test:slice-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-manifest-panels.test.ts",
+    "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package",
+    "postcompile": "npm run copy-wasm"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.750.0",
+    "@duckdb/duckdb-wasm": "^1.29.0",
+    "avsc": "^5.7.7",
+    "ts-node": "^10.9.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "@types/vscode": "^1.96.0",
+    "typescript": "^5.8.3"
+  }
+}

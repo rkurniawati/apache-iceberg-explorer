@@ -1,0 +1,37 @@
+{
+  "format-version": 1,
+  "table-uuid": "abc-123-def-456",
+  "location": "s3://my-bucket/warehouse/ns1/my_table",
+  "last-updated-ms": 1700000000000,
+  "schemas": [
+    {
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "id",   "type": "long",   "required": true  },
+        { "id": 2, "name": "name", "type": "string",  "required": false }
+      ]
+    }
+  ],
+  "current-schema-id": 0,
+  "partition-spec": [
+    { "name": "id_bucket", "source-id": 1, "transform": "bucket[4]" }
+  ],
+  "snapshots": [
+    {
+      "snapshot-id": 1001,
+      "timestamp-ms": 1700000000000,
+      "manifest-list": "s3://my-bucket/warehouse/ns1/my_table/metadata/snap-1001.avro",
+      "summary": { "operation": "append", "added-records": "100" }
+    },
+    {
+      "snapshot-id": 1002,
+      "parent-snapshot-id": 1001,
+      "timestamp-ms": 1700100000000,
+      "manifest-list": "s3://my-bucket/warehouse/ns1/my_table/metadata/snap-1002.avro",
+      "summary": { "operation": "append", "added-records": "50" }
+    }
+  ],
+  "properties": {
+    "write.format.default": "parquet"
+  }
+}

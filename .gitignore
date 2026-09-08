@@ -1,0 +1,22 @@
+.vscode/test-user-data/
+# VS Code extension build output
+out/
+
+# Dependencies
+node_modules/
+
+# Packaged extension
+*.vsix
+
+# VS Code test data
+.vscode/test-user-data/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.idea/
+test-files/
+logs/
+tmp/

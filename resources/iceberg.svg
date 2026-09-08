@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- tip above waterline -->
+  <polygon points="8,1 13,8 3,8" fill="currentColor" opacity="0.6"/>
+  <!-- bulk below waterline -->
+  <polygon points="8,6 15,15 1,15" fill="currentColor"/>
+</svg>

@@ -1,0 +1,15 @@
+src/
+# All node_modules are excluded. Runtime duckdb-wasm files are copied to out/ by the
+# copy-wasm script and resolved via extensionUri at runtime — no node_modules needed.
+node_modules/
+**/*.map
+**/*.test.ts
+**/*.test.js
+.github/
+.gitignore
+tsconfig.json
+.eslintrc*
+*.md
+test/
+src/test/
+out/test/

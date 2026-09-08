@@ -1,0 +1,383 @@
+/**
+ * Slice integration smoke test — settings panel end-to-end.
+ * (plan.md §4, FR-1, FR-2, FR-2b, FR-3, FR-4, FR-5, FR-6c, AC-1, AC-9)
+ *
+ * Run with:
+ *   npm run test:slice-settings
+ *
+ * This test does NOT open a real VS Code window and does NOT invoke `vscode.*` APIs.
+ * The `test-setup.ts` register intercepts `require('vscode')` and returns a stub.
+ */
+import * as assert from 'node:assert';
+
+import type { ConnectionConfig } from '../connection/types';
+import type { ActiveConnectionHandle } from '../storage/types';
+import { storageError } from '../storage/errors';
+import type { StorageError } from '../storage/errors';
+import type { ILogger } from '../extension';
+import { WebviewPanelManager } from '../panels/webviewPanelManager';
+import { validateConnectionInput } from '../connection/validation';
+
+// ---------------------------------------------------------------------------
+// The vscode mock (via test-setup.ts → __mocks__/vscode.ts) exposes
+// window.createWebviewPanel which returns a fake panel. The fake panel's
+// webview has a `_getMessages()` helper. We also need to capture the
+// onDidReceiveMessage handler so we can fire messages from the test.
+//
+// We monkey-patch the mock once here and restore afterwards, scoped per test.
+// ---------------------------------------------------------------------------
+
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const vscodeMock = require('vscode') as any;
+
+/** Build a fake panel and temporarily replace vscode.window.createWebviewPanel.
+ *  Always returns a Promise so the finally runs after async work completes.
+ */
+async function withFakePanel(fn: (api: {
+  getHtml: () => string;
+  getMessages: () => Array<{ type: string; [k: string]: unknown }>;
+  fireMessage: (msg: unknown) => Promise<void>;
+}) => Promise<void>): Promise<void> {
+  const messages: Array<{ type: string; [k: string]: unknown }> = [];
+  let msgHandler: ((msg: unknown) => void | Promise<void>) | null = null;
+
+  const fakePanel: any = {
+    title: '',
+    webview: {
+      html: '',
+      cspSource: 'vscode-resource:',
+      postMessage(msg: { type: string; [k: string]: unknown }) { messages.push(msg); },
+      onDidReceiveMessage(handler: (msg: unknown) => void) {
+        msgHandler = handler;
+        return { dispose() {} };
+      },
+    },
+    reveal(_col: unknown) {},
+    onDidDispose(_handler: () => void, _ctx: unknown, _subs: unknown) { return { dispose() {} }; },
+    dispose() {},
+  };
+
+  const original = vscodeMock.window.createWebviewPanel;
+  vscodeMock.window.createWebviewPanel = () => fakePanel;
+  try {
+    await fn({
+      getHtml:     () => fakePanel.webview.html as string,
+      getMessages: () => messages,
+      fireMessage: async (msg: unknown) => {
+        if (msgHandler) { await msgHandler(msg); }
+      },
+    });
+  } finally {
+    vscodeMock.window.createWebviewPanel = original;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Fake Extension Context
+// ---------------------------------------------------------------------------
+
+const fakeContext: any = {
+  extensionUri: { fsPath: '.' },
+  subscriptions: [],
+};
+
+// ---------------------------------------------------------------------------
+// Fake StorageAdapter (no-op — settings panel does not use it)
+// ---------------------------------------------------------------------------
+
+const fakeStorageAdapter: any = {
+  async listSchemas() { return []; },
+  async listTables() { return []; },
+  async listMetadataVersions() { return []; },
+  async fetchMetadataJson() { return {}; },
+  async fetchFileToTemp() { return ''; },
+  async deleteTemp() { return; },
+};
+
+// ---------------------------------------------------------------------------
+// Test logger
+// ---------------------------------------------------------------------------
+
+const testLogLines: string[] = [];
+const testLogger: ILogger = {
+  info(msg)  { testLogLines.push(`[INFO]  ${msg}`); },
+  warn(msg)  { testLogLines.push(`[WARN]  ${msg}`); },
+  error(msg) { testLogLines.push(`[ERROR] ${msg}`); },
+};
+
+function clearLog() { testLogLines.length = 0; }
+
+// ---------------------------------------------------------------------------
+// Stub callbacks
+// ---------------------------------------------------------------------------
+
+const noopSaveConnection = async (
+  _config: ConnectionConfig,
+  _creds: { accessKey: string; secretKey: string },
+): Promise<void> => { /* success */ };
+
+const noopActivateConnection = async (
+  _id: string,
+): Promise<ActiveConnectionHandle> => ({ connectionType: 'local', warehousePath: '/tmp' });
+
+const noopDeleteConnection = async (_id: string): Promise<void> => { /* no-op */ };
+
+// ---------------------------------------------------------------------------
+// Test runner
+// ---------------------------------------------------------------------------
+
+let passed = 0;
+let failed = 0;
+
+async function run(name: string, fn: () => Promise<void> | void): Promise<void> {
+  try {
+    await fn();
+    console.log(`  \u2713 ${name}`);
+    passed++;
+  } catch (err) {
+    console.error(`  \u2717 ${name}`);
+    console.error('   ', err);
+    failed++;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+void (async () => {
+
+  // 1. openSettingsPanel opens a panel — HTML contains title string
+  await run('openSettingsPanel opens a panel with correct title in HTML', async () => {
+    clearLog();
+    await withFakePanel(async ({ getHtml }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+      const html = getHtml();
+      assert.ok(
+        html.includes('Iceberg Explorer \u2014 Settings'),
+        `HTML did not contain expected title. First 300 chars: ${html.slice(0, 300)}`,
+      );
+    });
+  });
+
+  // 2. One-panel-per-resource guard — calling twice leaves registry size == 1
+  await run('One-panel-per-resource guard: calling openSettingsPanel twice keeps registry size 1', async () => {
+    const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+    const original = vscodeMock.window.createWebviewPanel;
+    let createCount = 0;
+    vscodeMock.window.createWebviewPanel = () => {
+      createCount++;
+      return {
+        title: '',
+        webview: {
+          html: '',
+          cspSource: 'vscode-resource:',
+          postMessage() {},
+          onDidReceiveMessage() { return { dispose() {} }; },
+        },
+        reveal() {},
+        onDidDispose() { return { dispose() {} }; },
+        dispose() {},
+      };
+    };
+    try {
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+      const sizeAfterFirst = (mgr as any).registry.size;
+
+      // Second call — panel already in registry, should reveal and return
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+      const sizeAfterSecond = (mgr as any).registry.size;
+
+      assert.strictEqual(sizeAfterFirst,  1, `expected size 1 after first call, got ${sizeAfterFirst}`);
+      assert.strictEqual(sizeAfterSecond, 1, `expected size 1 after second call, got ${sizeAfterSecond}`);
+      assert.strictEqual(createCount, 1, `createWebviewPanel should be called only once, was called ${createCount} times`);
+    } finally {
+      vscodeMock.window.createWebviewPanel = original;
+    }
+  });
+
+  // 3. saveConnection message → saveSuccess response
+  await run('saveConnection message → saveSuccess is posted back', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 'local',
+        label: 'My Warehouse',
+        warehousePath: '/data/warehouse',
+        sslVerification: true,
+      });
+
+      const msgs = getMessages();
+      const success = msgs.find((m) => m.type === 'saveSuccess');
+      assert.ok(success, `expected saveSuccess in messages: ${JSON.stringify(msgs)}`);
+    });
+  });
+
+  // 4. saveConnection message → saveError when callback rejects
+  await run('saveConnection message → saveError when saveConnection callback rejects', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const failingSave = async () => { throw new Error('disk full'); };
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, failingSave, noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 'local',
+        label: 'Bad',
+        warehousePath: '/tmp',
+        sslVerification: true,
+      });
+
+      const msgs = getMessages();
+      const errorMsg = msgs.find((m) => m.type === 'saveError');
+      assert.ok(errorMsg, `expected saveError in messages: ${JSON.stringify(msgs)}`);
+      assert.ok(
+        typeof errorMsg!.message === 'string' && (errorMsg!.message as string).length > 0,
+        'saveError must carry a non-empty message',
+      );
+    });
+  });
+
+  // 5. activateConnection message → activateSuccess
+  await run('activateConnection message → activateSuccess is posted back', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({ type: 'activateConnection', id: 'conn-abc' });
+
+      const msgs = getMessages();
+      const success = msgs.find((m) => m.type === 'activateSuccess');
+      assert.ok(success, `expected activateSuccess in messages: ${JSON.stringify(msgs)}`);
+    });
+  });
+
+  // 6. activateConnection message → activateError when callback returns StorageError
+  await run('activateConnection message → activateError when callback returns StorageError', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const failingActivate = async (_id: string): Promise<ActiveConnectionHandle | StorageError> =>
+        storageError('not-found', 'Connection not found.');
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, failingActivate, noopDeleteConnection);
+
+      await fireMessage({ type: 'activateConnection', id: 'missing-conn' });
+
+      const msgs = getMessages();
+      const errorMsg = msgs.find((m) => m.type === 'activateError');
+      assert.ok(errorMsg, `expected activateError in messages: ${JSON.stringify(msgs)}`);
+      assert.strictEqual(
+        errorMsg!.message, 'Connection not found.',
+        `activateError message mismatch: ${String(errorMsg!.message)}`,
+      );
+    });
+  });
+
+  // 7. HTML does NOT contain the old saved-connections section
+  await run('HTML does NOT contain id="saved-section" (saved connections removed from panel)', async () => {
+    await withFakePanel(async ({ getHtml }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+      const html = getHtml();
+      assert.ok(
+        !html.includes('id="saved-section"'),
+        'HTML must NOT contain id="saved-section" (section was removed)',
+      );
+    });
+  });
+
+  // 8. No credential strings in logs (NFR-7, design.md §2.8.3)
+  await run('No credential strings (accessKey / secretKey) appear in log output', async () => {
+    clearLog();
+    await withFakePanel(async ({ fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+
+      // Simulate a save with S3 credentials
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 's3',
+        label: 'S3 Test',
+        warehousePath: 's3://my-bucket/prefix',
+        endpointUrl: 'https://s3.example.com',
+        region: 'us-east-1',
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        sslVerification: true,
+      });
+    });
+
+    const CRED_PATTERN = /(?:AKIAIOSFODNN7EXAMPLE|wJalrXUtnFEMI|accessKey\s*[:=]|secretKey\s*[:=])/i;
+    const credLines = testLogLines.filter(l => CRED_PATTERN.test(l));
+    assert.strictEqual(
+      credLines.length, 0,
+      `Credential content found in logs:\n${credLines.join('\n')}`,
+    );
+  });
+
+  // 9. saveConnection trims whitespace from credentials and accepts optional endpointUrl
+  await run('saveConnection message trims credentials and accepts optional endpointUrl', async () => {
+    let capturedConfig: ConnectionConfig | null = null;
+    let capturedCreds: { accessKey: string; secretKey: string } | null = null;
+    const saveSpy = async (cfg: ConnectionConfig, creds: { accessKey: string; secretKey: string }) => {
+      capturedConfig = cfg;
+      capturedCreds = creds;
+    };
+
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, saveSpy, noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 's3',
+        label: '  AWS Production  ',
+        warehousePath: '  s3://my-bucket/prefix  ',
+        endpointUrl: '',
+        region: '  us-east-1  ',
+        accessKey: '  AKIAIOSFODNN7EXAMPLE  ',
+        secretKey: '  wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY\n  ',
+        sslVerification: true,
+      });
+
+      const msgs = getMessages();
+      const success = msgs.find((m) => m.type === 'saveSuccess');
+      assert.ok(success, `expected saveSuccess in messages: ${JSON.stringify(msgs)}`);
+      assert.strictEqual(capturedConfig?.label, 'AWS Production');
+      assert.strictEqual(capturedConfig?.warehousePath, 's3://my-bucket/prefix');
+      assert.strictEqual(capturedConfig?.region, 'us-east-1');
+      assert.strictEqual(capturedConfig?.endpointUrl, undefined);
+      assert.strictEqual(capturedCreds?.accessKey, 'AKIAIOSFODNN7EXAMPLE');
+      assert.strictEqual(capturedCreds?.secretKey, 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY');
+    });
+  });
+
+  // 10. validateConnectionInput allows empty/omitted endpointUrl for S3
+  await run('validateConnectionInput permits S3 connections without endpointUrl', async () => {
+    const valid = validateConnectionInput(
+      {
+        id: 'test-conn',
+        label: 'AWS',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: Date.now(),
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+    );
+    assert.strictEqual(valid.valid, true, `expected valid: true, got ${JSON.stringify(valid)}`);
+  });
+
+  // ── Summary ───────────────────────────────────────────────────────────────
+
+  console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
+  if (failed > 0) { process.exitCode = 1; }
+
+})();

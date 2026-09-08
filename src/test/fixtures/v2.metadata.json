@@ -1,0 +1,85 @@
+{
+  "format-version": 2,
+  "table-uuid": "abc-123-def-456",
+  "location": "s3://my-bucket/warehouse/ns1/my_table",
+  "last-updated-ms": 1700200000000,
+  "last-sequence-number": 42,
+  "schemas": [
+    {
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "id",    "type": "long",   "required": true  },
+        { "id": 2, "name": "name",  "type": "string", "required": false }
+      ]
+    },
+    {
+      "schema-id": 1,
+      "fields": [
+        { "id": 1, "name": "id",    "type": "long",   "required": true  },
+        { "id": 2, "name": "name",  "type": "string", "required": false },
+        { "id": 3, "name": "email", "type": "string", "required": false, "doc": "Contact email" }
+      ]
+    }
+  ],
+  "current-schema-id": 1,
+  "partition-specs": [
+    {
+      "spec-id": 0,
+      "fields": [
+        { "name": "id_bucket",   "source-id": 1, "transform": "bucket[4]" }
+      ]
+    },
+    {
+      "spec-id": 1,
+      "fields": [
+        { "name": "id_truncate", "source-id": 1, "transform": "truncate[10]" }
+      ]
+    }
+  ],
+  "default-spec-id": 1,
+  "sort-orders": [
+    { "order-id": 0, "fields": [] },
+    {
+      "order-id": 1,
+      "fields": [
+        { "transform": "identity", "source-id": 1, "direction": "asc", "null-order": "nulls-first" }
+      ]
+    }
+  ],
+  "default-sort-order-id": 1,
+  "refs": {
+    "main": {
+      "type": "branch",
+      "snapshot-id": 2002,
+      "max-ref-age-ms": 604800000,
+      "min-snapshots-to-keep": 3
+    },
+    "v1.0": {
+      "type": "tag",
+      "snapshot-id": 1001
+    }
+  },
+  "snapshots": [
+    {
+      "snapshot-id": 1001,
+      "timestamp-ms": 1700000000000,
+      "schema-id": 0,
+      "sequence-number": 1,
+      "manifest-list": "s3://my-bucket/warehouse/ns1/my_table/metadata/snap-1001.avro",
+      "summary": { "operation": "append", "added-records": "100" }
+    },
+    {
+      "snapshot-id": 2002,
+      "parent-snapshot-id": 1001,
+      "timestamp-ms": 1700200000000,
+      "schema-id": 1,
+      "sequence-number": 42,
+      "manifest-list": "s3://my-bucket/warehouse/ns1/my_table/metadata/snap-2002.avro",
+      "summary": { "operation": "append", "added-records": "25" }
+    }
+  ],
+  "properties": {
+    "write.format.default": "parquet",
+    "write.target-file-size-bytes": "134217728"
+  }
+}

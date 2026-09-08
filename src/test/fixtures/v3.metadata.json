@@ -1,0 +1,68 @@
+{
+  "format-version": 3,
+  "table-uuid": "abc-123-def-456",
+  "location": "s3://my-bucket/warehouse/ns1/my_table",
+  "last-updated-ms": 1700300000000,
+  "last-sequence-number": 99,
+  "schemas": [
+    {
+      "schema-id": 2,
+      "fields": [
+        {
+          "id": 1,
+          "name": "id",
+          "type": "long",
+          "required": true,
+          "initial-default": 0,
+          "write-default": 0
+        },
+        {
+          "id": 2,
+          "name": "name",
+          "type": "string",
+          "required": false,
+          "initial-default": null,
+          "write-default": null
+        },
+        {
+          "id": 4,
+          "name": "geo",
+          "type": "geometry",
+          "required": false
+        }
+      ]
+    }
+  ],
+  "current-schema-id": 2,
+  "partition-specs": [
+    {
+      "spec-id": 2,
+      "fields": [
+        { "name": "id_bucket", "source-id": 1, "transform": "bucket[8]" }
+      ]
+    }
+  ],
+  "default-spec-id": 2,
+  "sort-orders": [
+    { "order-id": 0, "fields": [] }
+  ],
+  "default-sort-order-id": 0,
+  "refs": {
+    "main": { "type": "branch", "snapshot-id": 3003 }
+  },
+  "snapshots": [
+    {
+      "snapshot-id": 3003,
+      "timestamp-ms": 1700300000000,
+      "schema-id": 2,
+      "sequence-number": 99,
+      "manifest-list": "s3://my-bucket/warehouse/ns1/my_table/metadata/snap-3003.avro",
+      "summary": { "operation": "overwrite", "added-records": "200", "deleted-records": "50" }
+    }
+  ],
+  "properties": {
+    "write.format.default": "parquet",
+    "encryption.key-id": "AAAAAAAAAAAAAAAAAAAAAA==",
+    "owner": "data-team"
+  }
+}
