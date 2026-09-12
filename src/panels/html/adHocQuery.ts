@@ -94,7 +94,7 @@ ${BREADCRUMB_CSS}
 <body>
   <div id="breadcrumb">${breadcrumbHtml(resourcePath)}</div>
   <div id="query-area">
-    <textarea id="sql-input" placeholder="SELECT * FROM data LIMIT 100"></textarea>
+    <textarea id="sql-input" placeholder="SELECT * FROM data LIMIT 100">SELECT * FROM data LIMIT 100;</textarea>
     <div id="btn-row">
       <button id="run-btn">Run</button>
       <button id="cancel-btn">Cancel</button>
@@ -116,7 +116,8 @@ ${RENDER_TABLE_SCRIPT}
 
     document.getElementById('run-btn').addEventListener('click', () => {
       if (isLoading) return;
-      const sql = document.getElementById('sql-input').value.trim();
+      const inputEl = document.getElementById('sql-input');
+      const sql = (inputEl.value.trim() || inputEl.placeholder.trim());
       if (!sql) return;
       vscode.postMessage({ type: 'runQuery', sql });
     });

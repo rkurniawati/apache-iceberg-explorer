@@ -83,6 +83,56 @@ export function registerTreeCommands(
     ),
   );
 
+  // ── icebergExplorer.openTableOverview ──────────────────────────────────
+  // Arguments: [tablePath: string]
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.openTableOverview',
+      async (tablePath: string) => {
+        logger.info(`openTableOverview command: path=${tablePath}`);
+        const handle = provider.getActiveHandle();
+        if (!handle) {
+          logger.warn('openTableOverview: no active connection handle — ignoring');
+          return;
+        }
+        void panelManager.openTableOverviewPanel(tablePath, handle, provider.getStorageAdapter());
+      },
+    ),
+  );
+
+  // ── icebergExplorer.openConnectionDashboard ──────────────────────────────
+  // Arguments: [id: string]
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.openConnectionDashboard',
+      async (id: string) => {
+        logger.info(`openConnectionDashboard command: id=${id}`);
+        const configs = listConnections();
+        const config = configs.find(c => c.id === id);
+        const handle = provider.getActiveHandle();
+        if (!config || !handle) { return; }
+        void panelManager.openConnectionDashboardPanel(config, handle, provider.getStorageAdapter());
+      },
+    ),
+  );
+
+  // ── icebergExplorer.openMetadataArchitecture ────────────────────────────
+  // Arguments: [tablePath: string]
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.openMetadataArchitecture',
+      async (tablePath: string) => {
+        logger.info(`openMetadataArchitecture command: path=${tablePath}`);
+        const handle = provider.getActiveHandle();
+        if (!handle) {
+          logger.warn('openMetadataArchitecture: no active connection handle — ignoring');
+          return;
+        }
+        void panelManager.openMetadataArchitecturePanel(tablePath, handle, provider.getStorageAdapter());
+      },
+    ),
+  );
+
   // ── icebergExplorer.activateConnection ──────────────────────────────────
   // Arguments: [id: string]
   context.subscriptions.push(
@@ -99,6 +149,12 @@ export function registerTreeCommands(
         }
         provider.setActiveConnectionId(id);
         provider.setActiveConnection(result.handle, result.adapter);
+
+        const configs = listConnections();
+        const config = configs.find(c => c.id === id);
+        if (config) {
+          void panelManager.openConnectionDashboardPanel(config, result.handle, result.adapter);
+        }
       },
     ),
   );

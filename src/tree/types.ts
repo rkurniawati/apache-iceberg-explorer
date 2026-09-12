@@ -84,6 +84,11 @@ export function makeTableItem(tablePath: string, label: string, parentPath: stri
     parentPath,
   );
   item.iconPath = new vscode.ThemeIcon('table');
+  item.command = {
+    command: 'icebergExplorer.openTableOverview',
+    title: 'Open Table Overview',
+    arguments: [tablePath],
+  };
   return item;
 }
 
@@ -121,6 +126,11 @@ export function makeMetadataFolderItem(tablePath: string): IcebergTreeItem {
     tablePath,
   );
   item.iconPath = new vscode.ThemeIcon('folder');
+  item.command = {
+    command: 'icebergExplorer.openMetadataArchitecture',
+    title: 'Open Metadata Architecture',
+    arguments: [tablePath],
+  };
   return item;
 }
 

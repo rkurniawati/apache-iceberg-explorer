@@ -4,7 +4,9 @@
  */
 export enum PanelType {
   MetadataDetail = 'metadataDetail',
-  /** Stubs — not implemented in this slice. */
+  TableOverview = 'tableOverview',
+  ConnectionDashboard = 'connectionDashboard',
+  MetadataArchitecture = 'metadataArchitecture',
   ManifestList = 'manifestList',
   ManifestFile = 'manifestFile',
   ParquetPreview = 'parquetPreview',

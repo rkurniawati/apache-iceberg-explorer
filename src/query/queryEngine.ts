@@ -354,28 +354,35 @@ export class QueryEngine {
 
   /**
    * Executes `sql` on a fresh connection with the 30-second watchdog armed.
-   * Reads the file at `tempFilePath` into a virtual WASM buffer, executes,
-   * extracts Arrow result into plain JS objects, then drops the virtual file.
+   * Reads the file(s) at `tempFilePath` into virtual WASM buffer(s), executes,
+   * extracts Arrow result into plain JS objects, then drops the virtual file(s).
    * Closes the connection and disarms the watchdog in all code paths.
    */
   private async runQuery(
     sql: string,
     queryType: 'preview' | 'adhoc',
-    tempFilePath: string,
+    tempFilePath: string | string[],
     virtualName: string,
+    tableName?: string,
   ): Promise<{ rows: Record<string, unknown>[]; columnNames: string[] }> {
     const db = await this.getInstance();
+    const files = Array.isArray(tempFilePath) ? tempFilePath : [tempFilePath];
+    const registeredNames: string[] = [];
 
-    // Register the file buffer; ensure it is always dropped even if connect() throws.
-    const buffer = await fs.readFile(tempFilePath);
-    await db.registerFileBuffer(virtualName, new Uint8Array(buffer));
-
+    // Register all file buffers; ensure they are always dropped even if connect() throws.
     try {
+      for (let i = 0; i < files.length; i++) {
+        const vName = files.length === 1 ? virtualName : `${virtualName}_${i}.parquet`;
+        const buffer = await fs.readFile(files[i]);
+        await db.registerFileBuffer(vName, new Uint8Array(buffer));
+        registeredNames.push(vName);
+      }
+
       const conn = await db.connect();
       this.currentConnection = conn;
       this.pendingCancelReason = null;
 
-      this.logger.info(`Query started: file=${tempFilePath} queryType=${queryType}`);
+      this.logger.info(`Query started: files=${files.length} queryType=${queryType}`);
 
       // Arm the timeout watchdog (FR-16, QE-V4)
       let watchdogFired = false;
@@ -388,9 +395,18 @@ export class QueryEngine {
 
       try {
         if (queryType === 'adhoc') {
+          const parquetSources = registeredNames.map(n => `'${n}'`).join(', ');
+          const readParquetSql = registeredNames.length === 1
+            ? `read_parquet('${registeredNames[0]}')`
+            : `read_parquet([${parquetSources}])`;
           await conn.query(
-            `CREATE OR REPLACE TEMPORARY VIEW data AS SELECT * FROM read_parquet('${virtualName}')`,
+            `CREATE OR REPLACE TEMPORARY VIEW data AS SELECT * FROM ${readParquetSql}`,
           );
+          if (tableName && tableName !== 'data') {
+            await conn.query(
+              `CREATE OR REPLACE TEMPORARY VIEW "${tableName}" AS SELECT * FROM data`,
+            );
+          }
         }
 
         const table = await conn.query(sql);
@@ -414,12 +430,17 @@ export class QueryEngine {
         this.currentConnection = null;
         if (queryType === 'adhoc') {
           try { await conn.query('DROP VIEW IF EXISTS data'); } catch { /* ignore */ }
+          if (tableName && tableName !== 'data') {
+            try { await conn.query(`DROP VIEW IF EXISTS "${tableName}"`); } catch { /* ignore */ }
+          }
         }
         try { await conn.close(); } catch { /* ignore */ }
       }
     } finally {
-      // Always drop the virtual file, whether connect() succeeded or not.
-      try { await db.dropFile(virtualName); } catch { /* ignore */ }
+      // Always drop the virtual files, whether connect() succeeded or not.
+      for (const vName of registeredNames) {
+        try { await db.dropFile(vName); } catch { /* ignore */ }
+      }
     }
   }
 
@@ -587,22 +608,34 @@ export class QueryEngine {
   }
 
   /**
-   * Execute user-supplied ad-hoc SQL against a Parquet file (FR-14, FR-15).
+   * Execute user-supplied ad-hoc SQL against Parquet file(s) (FR-14, FR-15).
    * Injects `LIMIT 10000` when no LIMIT clause is present (QE-V3).
-   * Queries reference the Parquet data using the `data` view (e.g. `SELECT * FROM data`).
+   * Queries reference the Parquet data using the `data` view (e.g. `SELECT * FROM data`)
+   * or the table view if tableName is provided.
    * Returns `QueryResult` on success, `QueryError` on failure.
    */
-  async runAdHocQuery(tempFilePath: string, sql: string): Promise<QueryResult | QueryError> {
+  async runAdHocQuery(
+    tempFilePath: string | string[],
+    sql: string,
+    tableName?: string,
+  ): Promise<QueryResult | QueryError> {
     // QE-V2: empty SQL guard
     if (!sql.trim()) {
       return queryError('internal', 'Query cannot be empty.');
     }
 
-    const fileErr = this.validateTempFile(tempFilePath);
-    if (fileErr) { return fileErr; }
+    const files = Array.isArray(tempFilePath) ? tempFilePath : [tempFilePath];
+    if (files.length === 0) {
+      return queryError('internal', 'No data files provided for query.');
+    }
+
+    for (const f of files) {
+      const fileErr = this.validateTempFile(f);
+      if (fileErr) { return fileErr; }
+    }
 
     // Strip single-quotes from the basename to keep the SQL literal safe.
-    const virtualName = `adhoc_${path.basename(tempFilePath).replace(/'/g, '')}`;
+    const virtualName = `adhoc_${path.basename(files[0]).replace(/'/g, '')}`;
 
     // QE-V3: inject LIMIT if absent
     let finalSql = sql;
@@ -614,7 +647,7 @@ export class QueryEngine {
 
     const start = Date.now();
     try {
-      const { rows, columnNames } = await this.runQuery(finalSql, 'adhoc', tempFilePath, virtualName);
+      const { rows, columnNames } = await this.runQuery(finalSql, 'adhoc', files, virtualName, tableName);
       const durationMs = Date.now() - start;
       const wasCapped = !hasLimit && rows.length === ADHOC_LIMIT;
 

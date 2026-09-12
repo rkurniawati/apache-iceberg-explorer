@@ -25,8 +25,19 @@ import { getManifestListHtml } from './html/manifestList.js';
 import { getManifestFileHtml } from './html/manifestFile.js';
 import { getParquetPreviewHtml } from './html/parquetPreview.js';
 import { getAdHocQueryHtml } from './html/adHocQuery.js';
+import { getTableOverviewHtml } from './html/tableOverview.js';
+import { getConnectionDashboardHtml } from './html/connectionDashboard.js';
+import { getMetadataArchitectureHtml } from './html/metadataArchitecture.js';
+import type {
+  TableColumnSummary,
+  TablePartitionField,
+  SnapshotSummaryItem,
+  DiscoveredTableItem,
+  ManifestArchitectureCard,
+  ManifestDataFileEntry,
+} from './messages.js';
 import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
-import type { QueryEngine } from '../query/index.js';
+import type { QueryEngine, ManifestEntryRow, DataFileRow } from '../query/index.js';
 import { isQueryError } from '../query/index.js';
 
 // ---------------------------------------------------------------------------
@@ -153,7 +164,7 @@ export class WebviewPanelManager {
    * but the cleanup hook is wired per design.md §2.6 so future panel types
    * can register temp files without further scaffolding (T-15).
    */
-  private readonly tempFiles = new Map<string, string | null>();
+  private readonly tempFiles = new Map<string, string | string[] | null>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -662,27 +673,60 @@ export class WebviewPanelManager {
       void this.deleteTempFile(key, prevTemp);
     }
 
-    const fetchResult = await adapter.fetchFileToTemp(handle, resourcePath);
-    if (isStorageError(fetchResult)) {
-      const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
-      gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
-      this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} errorClass=${fetchResult.class}`);
-      return;
-    }
-
-    this.tempFiles.set(key, fetchResult);
-
     const engine = this.queryEngine;
     if (!engine) {
       gate.post({ type: 'setState', state: 'error', errorClass: 'internal', message: 'Query engine not available.' });
-      void this.deleteTempFile(key, fetchResult);
       return;
     }
 
+    // 1. Resolve Parquet file(s) to fetch
+    let parquetPathsToFetch: string[];
+    let tableName: string | undefined;
+
+    if (resourcePath.toLowerCase().endsWith('.parquet')) {
+      parquetPathsToFetch = [resourcePath];
+    } else {
+      tableName = lastPathSegment(resourcePath).replace(/[^a-zA-Z0-9_]/g, '_');
+      const resolveResult = await this.resolveTableParquetFiles(handle, resourcePath, adapter);
+      if (typeof resolveResult === 'string') {
+        gate.post({
+          type: 'setState',
+          state: 'error',
+          errorClass: 'not-found',
+          message: resolveResult,
+        });
+        this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} error=${resolveResult}`);
+        return;
+      }
+      parquetPathsToFetch = resolveResult.parquetPaths;
+      if (resolveResult.tableName) {
+        tableName = resolveResult.tableName;
+      }
+    }
+
+    // 2. Fetch Parquet files to temp
+    const tempFilePaths: string[] = [];
+    for (const p of parquetPathsToFetch) {
+      const fetchResult = await adapter.fetchFileToTemp(handle, p);
+      if (isStorageError(fetchResult)) {
+        for (const t of tempFilePaths) {
+          void adapter.deleteTemp(t);
+        }
+        const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
+        gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
+        this.logger.error(`Panel error: type=adHocQuery file=${p} errorClass=${fetchResult.class}`);
+        return;
+      }
+      tempFilePaths.push(fetchResult);
+    }
+
+    this.tempFiles.set(key, tempFilePaths);
+
     try {
-      const result = await engine.runAdHocQuery(fetchResult, sql);
+      const result = await engine.runAdHocQuery(tempFilePaths, sql, tableName);
+      void this.deleteTempFile(key, tempFilePaths);
+
       if (isQueryError(result)) {
-        void this.deleteTempFile(key, fetchResult);
         if (result.class === 'cancelled') {
           // cancelled → idle (design.md §2.3.2)
           gate.post({ type: 'setState', state: 'idle' });
@@ -695,18 +739,139 @@ export class WebviewPanelManager {
         return;
       }
 
-      void this.deleteTempFile(key, fetchResult);
       gate.post({ type: 'loadQueryResult', result });
       if (result.wasCapped) {
         gate.post({ type: 'showCapBanner', message: 'Results capped at 10,000 rows.' });
       }
       this.logger.info(`Panel loaded: type=adHocQuery resource=${resourcePath} rows=${result.rowCount} capped=${result.wasCapped}`);
     } catch (err: unknown) {
-      void this.deleteTempFile(key, fetchResult);
+      void this.deleteTempFile(key, tempFilePaths);
       const errMsg = err instanceof Error ? err.message : String(err);
       gate.post({ type: 'setState', state: 'error', errorClass: 'internal', message: `Failed to execute query: ${errMsg}` });
       this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} errorClass=internal error=${errMsg}`);
     }
+  }
+
+  /**
+   * Resolves active Parquet data files for a table from its current metadata and manifests.
+   * If the path points to a namespace/database directory containing tables, it resolves
+   * the child table automatically.
+   * Returns an array of Parquet file paths and the resolved table name, or an error message string.
+   */
+  private async resolveTableParquetFiles(
+    handle: ActiveConnectionHandle,
+    tablePath: string,
+    adapter: StorageAdapter,
+  ): Promise<{ parquetPaths: string[]; tableName?: string } | string> {
+    const engine = this.queryEngine;
+    if (!engine) {
+      return 'Query engine not available.';
+    }
+
+    // 1. Get metadata versions
+    let effectivePath = tablePath;
+    let versions = await adapter.listMetadataVersions(handle, effectivePath);
+    if (isStorageError(versions)) {
+      return `Could not list table metadata: ${versions.message}`;
+    }
+    if (versions.length === 0) {
+      // Check if tablePath is a database/namespace directory containing tables
+      const candidates = await adapter.listTables(handle, effectivePath);
+      if (!isStorageError(candidates) && candidates.length > 0) {
+        for (const cand of candidates) {
+          if (await adapter.isTable(handle, cand)) {
+            const candVersions = await adapter.listMetadataVersions(handle, cand);
+            if (!isStorageError(candVersions) && candVersions.length > 0) {
+              effectivePath = cand;
+              versions = candVersions;
+              this.logger.info(`Resolved child table ${cand} for directory ${tablePath}`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (versions.length === 0) {
+      return `No metadata versions found for table at ${tablePath}. If this is a database or namespace, select a table inside it (e.g. ${tablePath}/<tableName>).`;
+    }
+
+    // Sort newest first
+    const sorted = [...versions].sort((a, b) => b.sortKey - a.sortKey);
+    const newest = sorted[0];
+
+    // 2. Fetch metadata JSON
+    const metaJson = await adapter.fetchMetadataJson(handle, newest.resourcePath);
+    if (isStorageError(metaJson)) {
+      return `Could not read table metadata: ${metaJson.message}`;
+    }
+
+    // 3. Find current snapshot
+    const metaObj = metaJson as Record<string, unknown>;
+    const currentSnapshotId = metaObj['current-snapshot-id'];
+    const snapshots = (metaObj.snapshots ?? []) as Array<Record<string, unknown>>;
+    const snapshot = snapshots.find(s => s['snapshot-id'] === currentSnapshotId) ?? snapshots[snapshots.length - 1];
+
+    if (!snapshot || !snapshot['manifest-list']) {
+      return 'Table has no active snapshots or manifest list.';
+    }
+
+    // 4. Fetch manifest list Avro to temp
+    const manifestListPath = String(snapshot['manifest-list']);
+    const listTemp = await adapter.fetchFileToTemp(handle, manifestListPath);
+    if (isStorageError(listTemp)) {
+      return `Could not fetch manifest list (${manifestListPath}): ${listTemp.message}`;
+    }
+
+    let manifestEntries: ManifestEntryRow[];
+    try {
+      const parsed = await engine.parseManifestList(listTemp);
+      if (isQueryError(parsed)) {
+        return `Could not parse manifest list: ${parsed.message}`;
+      }
+      manifestEntries = parsed;
+    } finally {
+      void adapter.deleteTemp(listTemp);
+    }
+
+    // 5. Filter for data manifests (content === 0 or undefined)
+    const dataManifests = manifestEntries.filter(m => m.content === 0 || m.content == null);
+    if (dataManifests.length === 0) {
+      return `No data manifests found in snapshot ${snapshot['snapshot-id']}.`;
+    }
+
+    // 6. Parse manifests to collect active Parquet data files
+    const parquetPaths: string[] = [];
+    for (const dm of dataManifests) {
+      const manifestTemp = await adapter.fetchFileToTemp(handle, dm.manifestPath);
+      if (isStorageError(manifestTemp)) {
+        continue;
+      }
+      try {
+        const parsed = await engine.parseManifestFile(manifestTemp);
+        if (!isQueryError(parsed)) {
+          for (const df of parsed) {
+            // status: 0 = EXISTING, 1 = ADDED, 2 = DELETED
+            if (df.filePath.toLowerCase().endsWith('.parquet') && df.status !== 2) {
+              parquetPaths.push(df.filePath);
+            }
+          }
+        }
+      } finally {
+        void adapter.deleteTemp(manifestTemp);
+      }
+      if (parquetPaths.length >= 10) {
+        break;
+      }
+    }
+
+    if (parquetPaths.length === 0) {
+      return 'No active Parquet data files found for table.';
+    }
+
+    return {
+      parquetPaths,
+      tableName: lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_'),
+    };
   }
 
   /**
@@ -941,15 +1106,20 @@ export class WebviewPanelManager {
    */
   private onPanelDispose(key: string): void {
     const tempFile = this.tempFiles.get(key);
+    const record = this.registry.get(key);
     this.registry.delete(key);
     this.tempFiles.delete(key);
 
     if (tempFile) {
-      void this.storageAdapter.deleteTemp(tempFile).then(() => {
-        this.logger.info(`Temp file deleted: ${tempFile}`);
-      }).catch(() => {
-        this.logger.warn(`Temp file deletion failed (already absent): ${tempFile}`);
-      });
+      const adapter = record?.adapter ?? this.storageAdapter;
+      const files = Array.isArray(tempFile) ? tempFile : [tempFile];
+      for (const f of files) {
+        void adapter.deleteTemp(f).then(() => {
+          this.logger.info(`Temp file deleted: ${f}`);
+        }).catch(() => {
+          this.logger.warn(`Temp file deletion failed (already absent): ${f}`);
+        });
+      }
     }
   }
 
@@ -1031,15 +1201,695 @@ export class WebviewPanelManager {
   }
 
   /**
-   * Delete a registered temp file and clear the registry entry.
+   * Open or reveal the Table Overview panel for a table. (Phase 1 & 3)
+   */
+  async openTableOverviewPanel(
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    const effectiveAdapter = adapter ?? this.storageAdapter;
+    const key = panelRegistryKey(PanelType.TableOverview, tablePath);
+    const existing = this.registry.get(key);
+
+    if (existing) {
+      existing.panel.reveal(vscode.ViewColumn.One);
+      this.logger.info(`Panel revealed (already open): type=tableOverview resource=${tablePath}`);
+      if (existing.gate) {
+        existing.gate.repost();
+      }
+      return;
+    }
+
+    const title = lastPathSegment(tablePath);
+    const panel = vscode.window.createWebviewPanel(
+      PanelType.TableOverview,
+      `${title} — Overview`,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+
+    const gate = new WebviewReadyGate(panel, this.logger, 'tableOverview');
+    const nonce = generateNonce();
+    panel.webview.html = getTableOverviewHtml(nonce, panel.webview.cspSource, tablePath);
+
+    const record: PanelRecord = { panel, resourcePath: tablePath, handle, adapter: effectiveAdapter, gate };
+    this.registry.set(key, record);
+    this.tempFiles.set(key, null);
+
+    panel.onDidDispose(
+      () => this.onPanelDispose(key),
+      undefined,
+      this.context.subscriptions,
+    );
+
+    panel.webview.onDidReceiveMessage(
+      async (msg: WebviewMessage) => {
+        if (!msg?.type) { return; }
+        if (gate.onHostMessage(msg)) { return; }
+
+        switch (msg.type) {
+          case 'retry':
+            void this.loadTableOverview(gate, tablePath, handle, effectiveAdapter);
+            break;
+          case 'breadcrumbNavigate':
+            this._handleBreadcrumbNavigate(tablePath, msg.segment);
+            break;
+          case 'openAdHocQuery':
+            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'openMetadataPanel':
+            void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'openMetadataArchitecture':
+            void this.openMetadataArchitecturePanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'fetchDataPreview':
+            void this.loadDataPreview(gate, msg.tablePath, handle, effectiveAdapter);
+            break;
+        }
+      },
+      undefined,
+      this.context.subscriptions,
+    );
+
+    this.logger.info(`Panel opened: type=tableOverview resource=${tablePath}`);
+    await this.loadTableOverview(gate, tablePath, handle, effectiveAdapter);
+  }
+
+  /**
+   * Open or reveal the Connection Dashboard panel. (Phase 2)
+   */
+  async openConnectionDashboardPanel(
+    config: ConnectionConfig,
+    handle: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    const effectiveAdapter = adapter ?? this.storageAdapter;
+    const key = panelRegistryKey(PanelType.ConnectionDashboard, config.id);
+    const existing = this.registry.get(key);
+
+    if (existing) {
+      existing.panel.reveal(vscode.ViewColumn.One);
+      this.logger.info(`Panel revealed (already open): type=connectionDashboard resource=${config.id}`);
+      if (existing.gate) {
+        existing.gate.repost();
+      }
+      return;
+    }
+
+    const panel = vscode.window.createWebviewPanel(
+      PanelType.ConnectionDashboard,
+      `${config.label} — Dashboard`,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+
+    const gate = new WebviewReadyGate(panel, this.logger, 'connectionDashboard');
+    const nonce = generateNonce();
+    panel.webview.html = getConnectionDashboardHtml(nonce, panel.webview.cspSource);
+
+    const record: PanelRecord = { panel, resourcePath: config.id, handle, adapter: effectiveAdapter, gate };
+    this.registry.set(key, record);
+    this.tempFiles.set(key, null);
+
+    panel.onDidDispose(
+      () => this.onPanelDispose(key),
+      undefined,
+      this.context.subscriptions,
+    );
+
+    panel.webview.onDidReceiveMessage(
+      async (msg: WebviewMessage | { type: 'editConnection'; connectionId?: string }) => {
+        if (!msg?.type) { return; }
+        if (gate.onHostMessage(msg)) { return; }
+
+        switch (msg.type) {
+          case 'retry':
+            void this.loadConnectionDashboard(gate, config, handle, effectiveAdapter);
+            break;
+          case 'openAdHocQuery':
+            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'openTableOverview':
+            void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'editConnection':
+            void vscode.commands.executeCommand('icebergExplorer.openSettings', config.id);
+            break;
+        }
+      },
+      undefined,
+      this.context.subscriptions,
+    );
+
+    this.logger.info(`Panel opened: type=connectionDashboard resource=${config.id}`);
+    await this.loadConnectionDashboard(gate, config, handle, effectiveAdapter);
+  }
+
+  /**
+   * Open or reveal the Metadata Architecture DAG panel. (Phase 4)
+   */
+  async openMetadataArchitecturePanel(
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    const effectiveAdapter = adapter ?? this.storageAdapter;
+    const key = panelRegistryKey(PanelType.MetadataArchitecture, tablePath);
+    const existing = this.registry.get(key);
+
+    if (existing) {
+      existing.panel.reveal(vscode.ViewColumn.One);
+      this.logger.info(`Panel revealed (already open): type=metadataArchitecture resource=${tablePath}`);
+      if (existing.gate) {
+        existing.gate.repost();
+      }
+      return;
+    }
+
+    const title = lastPathSegment(tablePath);
+    const panel = vscode.window.createWebviewPanel(
+      PanelType.MetadataArchitecture,
+      `${title} — Architecture DAG`,
+      vscode.ViewColumn.One,
+      { enableScripts: true, retainContextWhenHidden: true },
+    );
+
+    const gate = new WebviewReadyGate(panel, this.logger, 'metadataArchitecture');
+    const nonce = generateNonce();
+    panel.webview.html = getMetadataArchitectureHtml(nonce, panel.webview.cspSource, tablePath);
+
+    const record: PanelRecord = { panel, resourcePath: tablePath, handle, adapter: effectiveAdapter, gate };
+    this.registry.set(key, record);
+    this.tempFiles.set(key, null);
+
+    panel.onDidDispose(
+      () => this.onPanelDispose(key),
+      undefined,
+      this.context.subscriptions,
+    );
+
+    panel.webview.onDidReceiveMessage(
+      async (msg: WebviewMessage) => {
+        if (!msg?.type) { return; }
+        if (gate.onHostMessage(msg)) { return; }
+
+        switch (msg.type) {
+          case 'retry':
+            void this.loadMetadataArchitecture(gate, tablePath, handle, effectiveAdapter);
+            break;
+          case 'breadcrumbNavigate':
+            this._handleBreadcrumbNavigate(tablePath, msg.segment);
+            break;
+          case 'openTableOverview':
+            void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'selectArchitectureSnapshot':
+            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, msg.snapshotId);
+            break;
+          case 'fetchManifestDataFiles':
+            void this.loadManifestDataFiles(gate, msg.manifestPath, handle, effectiveAdapter);
+            break;
+          case 'openParquetPreview':
+            void this.openParquetPreviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+        }
+      },
+      undefined,
+      this.context.subscriptions,
+    );
+
+    this.logger.info(`Panel opened: type=metadataArchitecture resource=${tablePath}`);
+    await this.loadMetadataArchitecture(gate, tablePath, handle, effectiveAdapter);
+  }
+
+  // ── Helper loading methods ──────────────────────────────────────────────────
+
+  private async loadTableOverview(
+    gate: WebviewReadyGate,
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+  ): Promise<void> {
+    gate.post({ type: 'setState', state: 'loading' });
+
+    let effectiveTablePath = tablePath;
+    let versions = await adapter.listMetadataVersions(handle, effectiveTablePath);
+    if (isStorageError(versions)) {
+      const msg = ERROR_MESSAGES[versions.class] ?? ERROR_MESSAGES['internal'];
+      gate.post({ type: 'setState', state: 'error', errorClass: versions.class, message: msg });
+      return;
+    }
+    if (versions.length === 0) {
+      // Check if tablePath is a database/namespace directory containing tables
+      const candidates = await adapter.listTables(handle, effectiveTablePath);
+      if (!isStorageError(candidates) && candidates.length > 0) {
+        for (const cand of candidates) {
+          if (await adapter.isTable(handle, cand)) {
+            const candVersions = await adapter.listMetadataVersions(handle, cand);
+            if (!isStorageError(candVersions) && candVersions.length > 0) {
+              effectiveTablePath = cand;
+              versions = candVersions;
+              this.logger.info(`Resolved child table ${cand} for directory ${tablePath}`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (versions.length === 0) {
+      gate.post({
+        type: 'setState',
+        state: 'error',
+        errorClass: 'not-found',
+        message: `No metadata versions found for table at ${tablePath}. If this is a database or namespace, select a table inside it (e.g. ${tablePath}/<tableName>).`,
+      });
+      return;
+    }
+
+    const latest = versions[0];
+    const raw = await adapter.fetchMetadataJson(handle, latest.resourcePath);
+    if (isStorageError(raw)) {
+      const msg = ERROR_MESSAGES[raw.class] ?? ERROR_MESSAGES['internal'];
+      gate.post({ type: 'setState', state: 'error', errorClass: raw.class, message: msg });
+      return;
+    }
+
+    const meta = raw as Record<string, any>;
+    const formatVersion = Number(meta['format-version'] ?? 1);
+    const tableUuid = String(meta['table-uuid'] ?? '');
+    const location = String(meta['location'] ?? tablePath);
+    const currentSnapshotId = meta['current-snapshot-id'] !== undefined ? String(meta['current-snapshot-id']) : null;
+    const lastUpdatedMs = meta['last-updated-ms'] ? Number(meta['last-updated-ms']) : null;
+    const properties: Record<string, string> = meta['properties'] ?? {};
+
+    // Columns
+    const currentSchemaId = meta['current-schema-id'];
+    const schemas = Array.isArray(meta['schemas']) ? meta['schemas'] : [];
+    const currentSchema = schemas.find((s: any) => s['schema-id'] === currentSchemaId) ?? meta['schema'] ?? schemas[0];
+    const fields = Array.isArray(currentSchema?.fields) ? currentSchema.fields : [];
+    const columns: TableColumnSummary[] = fields.map((f: any) => ({
+      id: Number(f.id ?? 0),
+      name: String(f.name ?? ''),
+      type: typeof f.type === 'string' ? f.type : JSON.stringify(f.type),
+      required: Boolean(f.required),
+      doc: f.doc ? String(f.doc) : undefined,
+    }));
+
+    // Partition Spec
+    const defaultSpecId = meta['default-spec-id'];
+    const specs = Array.isArray(meta['partition-specs']) ? meta['partition-specs'] : [];
+    const defaultSpec = specs.find((s: any) => s['spec-id'] === defaultSpecId) ?? specs[0];
+    const partitionFields = Array.isArray(defaultSpec?.fields) ? defaultSpec.fields : [];
+    const partitionSpec: TablePartitionField[] = partitionFields.map((p: any) => ({
+      sourceId: Number(p['source-id'] ?? 0),
+      fieldId: Number(p['field-id'] ?? 0),
+      name: String(p.name ?? ''),
+      transform: String(p.transform ?? 'identity'),
+    }));
+
+    // Snapshots
+    const rawSnaps = Array.isArray(meta['snapshots']) ? meta['snapshots'] : [];
+    const snapshots: SnapshotSummaryItem[] = rawSnaps
+      .slice()
+      .sort((a: any, b: any) => Number(b['timestamp-ms'] ?? 0) - Number(a['timestamp-ms'] ?? 0))
+      .map((s: any) => ({
+        snapshotId: String(s['snapshot-id']),
+        parentSnapshotId: s['parent-snapshot-id'] ? String(s['parent-snapshot-id']) : null,
+        timestampMs: Number(s['timestamp-ms'] ?? 0),
+        operation: String(s.summary?.operation ?? 'commit'),
+        addedRecords: s.summary?.['added-records'] ? String(s.summary['added-records']) : undefined,
+        deletedRecords: s.summary?.['deleted-records'] ? String(s.summary['deleted-records']) : undefined,
+        addedFiles: s.summary?.['added-data-files'] ? String(s.summary['added-data-files']) : undefined,
+        manifestList: s['manifest-list'] ? String(s['manifest-list']) : undefined,
+      }));
+
+    gate.post({
+      type: 'loadTableOverview',
+      tablePath,
+      tableName: lastPathSegment(tablePath),
+      formatVersion,
+      tableUuid,
+      location,
+      currentSnapshotId,
+      lastUpdatedMs,
+      columns,
+      partitionSpec,
+      snapshotsCount: snapshots.length,
+      properties,
+      latestMetadataPath: latest.resourcePath,
+      snapshots,
+    });
+  }
+
+  private async loadDataPreview(
+    gate: WebviewReadyGate,
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+  ): Promise<void> {
+    const engine = this.queryEngine;
+    if (!engine) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Query engine not available.' });
+      return;
+    }
+
+    let effectiveTablePath = tablePath;
+    let versions = await adapter.listMetadataVersions(handle, effectiveTablePath);
+    if (!isStorageError(versions) && versions.length === 0) {
+      const candidates = await adapter.listTables(handle, effectiveTablePath);
+      if (!isStorageError(candidates) && candidates.length > 0) {
+        for (const cand of candidates) {
+          if (await adapter.isTable(handle, cand)) {
+            const candVersions = await adapter.listMetadataVersions(handle, cand);
+            if (!isStorageError(candVersions) && candVersions.length > 0) {
+              effectiveTablePath = cand;
+              versions = candVersions;
+              this.logger.info(`Resolved child table ${cand} for directory ${tablePath}`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (isStorageError(versions) || versions.length === 0) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not find table metadata.' });
+      return;
+    }
+
+    const meta = await adapter.fetchMetadataJson(handle, versions[0].resourcePath);
+    if (isStorageError(meta)) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not read metadata JSON.' });
+      return;
+    }
+
+    const rawMeta = meta as Record<string, any>;
+    const currentSnapshotId = rawMeta['current-snapshot-id'];
+    const snapshots = Array.isArray(rawMeta['snapshots']) ? rawMeta['snapshots'] : [];
+    const currentSnap = snapshots.find((s: any) => s['snapshot-id'] === currentSnapshotId) ?? snapshots[snapshots.length - 1];
+    const manifestListPath = currentSnap?.['manifest-list'];
+    if (!manifestListPath) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'No snapshots or manifests found.' });
+      return;
+    }
+
+    const listTemp = await adapter.fetchFileToTemp(handle, manifestListPath);
+    if (isStorageError(listTemp)) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch manifest list.' });
+      return;
+    }
+
+    let manifestEntries: ManifestEntryRow[];
+    try {
+      const parsed = await engine.parseManifestList(listTemp);
+      if (isQueryError(parsed)) {
+        gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: parsed.message });
+        return;
+      }
+      manifestEntries = parsed;
+    } finally {
+      void adapter.deleteTemp(listTemp);
+    }
+
+    const dataManifest = manifestEntries.find(m => m.content === 0) ?? manifestEntries[0];
+    if (!dataManifest) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'No data manifest found.' });
+      return;
+    }
+
+    const manifestTemp = await adapter.fetchFileToTemp(handle, dataManifest.manifestPath);
+    if (isStorageError(manifestTemp)) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch manifest file.' });
+      return;
+    }
+
+    let dataFiles: DataFileRow[];
+    try {
+      const parsed = await engine.parseManifestFile(manifestTemp);
+      if (isQueryError(parsed)) {
+        gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: parsed.message });
+        return;
+      }
+      dataFiles = parsed;
+    } finally {
+      void adapter.deleteTemp(manifestTemp);
+    }
+
+    const sampleFile = dataFiles.find(f => f.filePath.endsWith('.parquet') && f.status !== 2);
+    if (!sampleFile) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'No active Parquet data files found.' });
+      return;
+    }
+
+    const parquetTemp = await adapter.fetchFileToTemp(handle, sampleFile.filePath);
+    if (isStorageError(parquetTemp)) {
+      gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch Parquet data file.' });
+      return;
+    }
+
+    try {
+      const previewResult = await engine.previewParquet(parquetTemp);
+      if (isQueryError(previewResult)) {
+        gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: previewResult.message });
+        return;
+      }
+
+      const rows = previewResult.rows.slice(0, 50);
+      gate.post({
+        type: 'loadDataPreview',
+        columns: previewResult.columnNames,
+        rows,
+        rowCount: rows.length,
+      });
+    } finally {
+      void adapter.deleteTemp(parquetTemp);
+    }
+  }
+
+  private async loadConnectionDashboard(
+    gate: WebviewReadyGate,
+    config: ConnectionConfig,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+  ): Promise<void> {
+    gate.post({ type: 'setState', state: 'loading' });
+
+    const schemasResult = await adapter.listSchemas(handle);
+    if (isStorageError(schemasResult)) {
+      const msg = ERROR_MESSAGES[schemasResult.class] ?? ERROR_MESSAGES['internal'];
+      gate.post({ type: 'setState', state: 'error', errorClass: schemasResult.class, message: msg });
+      return;
+    }
+
+    const tables: DiscoveredTableItem[] = [];
+    const discoveredSchemas = new Set<string>();
+
+    const exploreDirectory = async (
+      dirPath: string,
+      parentNamespace?: string,
+      depth = 0,
+    ): Promise<void> => {
+      if (depth > 6) return; // Prevent excessive recursion
+
+      const isTab = await adapter.isTable(handle, dirPath);
+      if (isTab === true) {
+        tables.push({
+          name: lastPathSegment(dirPath),
+          path: dirPath,
+          schema: parentNamespace ?? 'default',
+        });
+        return;
+      }
+
+      // If not a table, treat as a schema / namespace folder
+      const nsName = lastPathSegment(dirPath);
+      const currentNamespace = parentNamespace ? `${parentNamespace}.${nsName}` : nsName;
+      discoveredSchemas.add(currentNamespace);
+
+      const subEntries = await adapter.listTables(handle, dirPath);
+      if (!isStorageError(subEntries)) {
+        for (const child of subEntries) {
+          await exploreDirectory(child, currentNamespace, depth + 1);
+        }
+      }
+    };
+
+    for (const s of schemasResult) {
+      await exploreDirectory(s, undefined, 0);
+    }
+
+    gate.post({
+      type: 'loadConnectionDashboard',
+      connectionLabel: config.label,
+      connectionType: config.connectionType,
+      warehousePath: config.warehousePath,
+      region: config.region,
+      endpointUrl: config.endpointUrl,
+      schemasCount: discoveredSchemas.size > 0 ? discoveredSchemas.size : schemasResult.length,
+      tablesCount: tables.length,
+      tables,
+    });
+  }
+
+  private async loadMetadataArchitecture(
+    gate: WebviewReadyGate,
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+    targetSnapshotId?: string,
+  ): Promise<void> {
+    gate.post({ type: 'setState', state: 'loading' });
+
+    let effectiveTablePath = tablePath;
+    let versions = await adapter.listMetadataVersions(handle, effectiveTablePath);
+    if (!isStorageError(versions) && versions.length === 0) {
+      const candidates = await adapter.listTables(handle, effectiveTablePath);
+      if (!isStorageError(candidates) && candidates.length > 0) {
+        for (const cand of candidates) {
+          if (await adapter.isTable(handle, cand)) {
+            const candVersions = await adapter.listMetadataVersions(handle, cand);
+            if (!isStorageError(candVersions) && candVersions.length > 0) {
+              effectiveTablePath = cand;
+              versions = candVersions;
+              this.logger.info(`Resolved child table ${cand} for directory ${tablePath}`);
+              break;
+            }
+          }
+        }
+      }
+    }
+    if (isStorageError(versions) || versions.length === 0) {
+      const errClass = isStorageError(versions) ? versions.class : 'not-found';
+      gate.post({
+        type: 'setState',
+        state: 'error',
+        errorClass: errClass,
+        message: `Could not find metadata versions for table at ${tablePath}. If this is a database or namespace, select a table inside it (e.g. ${tablePath}/<tableName>).`,
+      });
+      return;
+    }
+
+    const latest = versions[0];
+    const meta = await adapter.fetchMetadataJson(handle, latest.resourcePath);
+    if (isStorageError(meta)) {
+      const msg = ERROR_MESSAGES[meta.class] ?? ERROR_MESSAGES['internal'];
+      gate.post({ type: 'setState', state: 'error', errorClass: meta.class, message: msg });
+      return;
+    }
+
+    const rawMeta = meta as Record<string, any>;
+    const rawSnaps = Array.isArray(rawMeta['snapshots']) ? rawMeta['snapshots'] : [];
+    const snapshots: SnapshotSummaryItem[] = rawSnaps
+      .slice()
+      .sort((a: any, b: any) => Number(b['timestamp-ms'] ?? 0) - Number(a['timestamp-ms'] ?? 0))
+      .map((s: any) => ({
+        snapshotId: String(s['snapshot-id']),
+        parentSnapshotId: s['parent-snapshot-id'] ? String(s['parent-snapshot-id']) : null,
+        timestampMs: Number(s['timestamp-ms'] ?? 0),
+        operation: String(s.summary?.operation ?? 'commit'),
+        addedRecords: s.summary?.['added-records'] ? String(s.summary['added-records']) : undefined,
+        deletedRecords: s.summary?.['deleted-records'] ? String(s.summary['deleted-records']) : undefined,
+        addedFiles: s.summary?.['added-data-files'] ? String(s.summary['added-data-files']) : undefined,
+        manifestList: s['manifest-list'] ? String(s['manifest-list']) : undefined,
+      }));
+
+    const currentSnapshotId = rawMeta['current-snapshot-id'] !== undefined ? String(rawMeta['current-snapshot-id']) : null;
+    const activeSnapId = targetSnapshotId ?? currentSnapshotId ?? (snapshots.length > 0 ? snapshots[0].snapshotId : null);
+    const activeSnapObj = rawSnaps.find((s: any) => String(s['snapshot-id']) === activeSnapId) ?? (rawSnaps.length > 0 ? rawSnaps[rawSnaps.length - 1] : null);
+
+    let activeSnapshotData: { snapshotId: string; manifestList: string; manifests: ManifestArchitectureCard[] } | null = null;
+
+    if (activeSnapObj && activeSnapObj['manifest-list'] && this.queryEngine) {
+      const mlPath = String(activeSnapObj['manifest-list']);
+      const mlTemp = await adapter.fetchFileToTemp(handle, mlPath);
+      if (!isStorageError(mlTemp)) {
+        try {
+          const rows = await this.queryEngine.parseManifestList(mlTemp);
+          if (!isQueryError(rows)) {
+            const manifests: ManifestArchitectureCard[] = rows.map(r => ({
+              path: r.manifestPath,
+              partitionSpecId: r.partitionSpecId,
+              addedFiles: r.addedFilesCount ?? 0,
+              existingFiles: r.existingFilesCount ?? 0,
+              deletedFiles: r.deletedFilesCount ?? 0,
+              partitionSummary: `Partition spec #${r.partitionSpecId}`,
+            }));
+            activeSnapshotData = {
+              snapshotId: String(activeSnapObj['snapshot-id']),
+              manifestList: mlPath,
+              manifests,
+            };
+          }
+        } finally {
+          void adapter.deleteTemp(mlTemp);
+        }
+      }
+    }
+
+    gate.post({
+      type: 'loadMetadataArchitecture',
+      tablePath,
+      metadataFile: latest.resourcePath,
+      currentSnapshotId,
+      snapshots,
+      activeSnapshot: activeSnapshotData,
+    });
+  }
+
+  private async loadManifestDataFiles(
+    gate: WebviewReadyGate,
+    manifestPath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+  ): Promise<void> {
+    const engine = this.queryEngine;
+    if (!engine) {
+      gate.post({ type: 'loadManifestDataFiles', manifestPath, files: [], error: 'Query engine not available.' });
+      return;
+    }
+
+    const manifestTemp = await adapter.fetchFileToTemp(handle, manifestPath);
+    if (isStorageError(manifestTemp)) {
+      gate.post({ type: 'loadManifestDataFiles', manifestPath, files: [], error: 'Could not fetch manifest file.' });
+      return;
+    }
+
+    try {
+      const parsed = await engine.parseManifestFile(manifestTemp);
+      if (isQueryError(parsed)) {
+        gate.post({ type: 'loadManifestDataFiles', manifestPath, files: [], error: parsed.message });
+        return;
+      }
+
+      const statusMap = (s: number) => (s === 1 ? 'ADDED' : s === 2 ? 'DELETED' : 'EXISTING');
+      const files: ManifestDataFileEntry[] = parsed.map(f => ({
+        path: f.filePath,
+        status: statusMap(f.status),
+        recordCount: f.recordCount,
+        fileSizeInBytes: f.fileSizeBytes,
+      }));
+
+      gate.post({ type: 'loadManifestDataFiles', manifestPath, files });
+    } finally {
+      void adapter.deleteTemp(manifestTemp);
+    }
+  }
+
+  /**
+   * Delete a registered temp file (or array of temp files) and clear the registry entry.
    * Called on success, error, and cancel paths (design.md §2.6).
    */
-  private deleteTempFile(key: string, tempFile: string): Promise<void> {
+  private async deleteTempFile(key: string, tempFile: string | string[]): Promise<void> {
     this.tempFiles.set(key, null);
-    return this.storageAdapter.deleteTemp(tempFile).then(() => {
-      this.logger.info(`Temp file deleted: ${tempFile}`);
-    }).catch(() => {
-      this.logger.warn(`Temp file deletion failed (already absent): ${tempFile}`);
-    });
+    const files = Array.isArray(tempFile) ? tempFile : [tempFile];
+    for (const f of files) {
+      try {
+        await this.storageAdapter.deleteTemp(f);
+        this.logger.info(`Temp file deleted: ${f}`);
+      } catch {
+        this.logger.warn(`Temp file deletion failed (already absent): ${f}`);
+      }
+    }
   }
 }

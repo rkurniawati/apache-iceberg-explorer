@@ -48,6 +48,21 @@
         "command": "icebergExplorer.deleteConnection",
         "title": "Delete Connection",
         "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.openTableOverview",
+        "title": "Open Table Overview",
+        "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.openConnectionDashboard",
+        "title": "Open Connection Dashboard",
+        "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.openMetadataArchitecture",
+        "title": "Open Metadata Architecture",
+        "category": "Iceberg Explorer"
       }
     ],
     "menus": {
@@ -83,6 +98,7 @@
     "test:slice-query": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-query-engine.test.ts",
     "test:slice-tree": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-tree-view.test.ts",
     "test:slice-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-manifest-panels.test.ts",
+    "test:slice-new-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts",
     "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package",
     "postcompile": "npm run copy-wasm"
   },

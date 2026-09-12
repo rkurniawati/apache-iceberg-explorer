@@ -57,6 +57,111 @@ export interface ShowCapBannerMessage {
   message: string;
 }
 
+export interface TableColumnSummary {
+  id: number;
+  name: string;
+  type: string;
+  required: boolean;
+  doc?: string;
+}
+
+export interface TablePartitionField {
+  sourceId: number;
+  fieldId: number;
+  name: string;
+  transform: string;
+}
+
+export interface SnapshotSummaryItem {
+  snapshotId: string;
+  parentSnapshotId: string | null;
+  timestampMs: number;
+  operation: string;
+  addedRecords?: string;
+  deletedRecords?: string;
+  addedFiles?: string;
+  manifestList?: string;
+}
+
+export interface LoadTableOverviewMessage {
+  type: 'loadTableOverview';
+  tablePath: string;
+  tableName: string;
+  formatVersion: number;
+  tableUuid: string;
+  location: string;
+  currentSnapshotId: string | null;
+  lastUpdatedMs: number | null;
+  columns: TableColumnSummary[];
+  partitionSpec: TablePartitionField[];
+  snapshotsCount: number;
+  properties: Record<string, string>;
+  latestMetadataPath: string;
+  snapshots: SnapshotSummaryItem[];
+}
+
+export interface LoadDataPreviewMessage {
+  type: 'loadDataPreview';
+  columns: string[];
+  rows: Array<Record<string, unknown>>;
+  rowCount: number;
+  error?: string;
+}
+
+export interface DiscoveredTableItem {
+  name: string;
+  path: string;
+  schema: string;
+}
+
+export interface LoadConnectionDashboardMessage {
+  type: 'loadConnectionDashboard';
+  connectionLabel: string;
+  connectionType: 'local' | 's3';
+  warehousePath: string;
+  region?: string;
+  endpointUrl?: string;
+  schemasCount: number;
+  tablesCount: number;
+  tables: DiscoveredTableItem[];
+}
+
+export interface ManifestArchitectureCard {
+  path: string;
+  partitionSpecId: number;
+  addedFiles: number;
+  existingFiles: number;
+  deletedFiles: number;
+  partitionSummary: string;
+}
+
+export interface LoadMetadataArchitectureMessage {
+  type: 'loadMetadataArchitecture';
+  tablePath: string;
+  metadataFile: string;
+  currentSnapshotId: string | null;
+  snapshots: SnapshotSummaryItem[];
+  activeSnapshot: {
+    snapshotId: string;
+    manifestList: string;
+    manifests: ManifestArchitectureCard[];
+  } | null;
+}
+
+export interface ManifestDataFileEntry {
+  path: string;
+  status: string;
+  recordCount: number;
+  fileSizeInBytes: number;
+}
+
+export interface LoadManifestDataFilesMessage {
+  type: 'loadManifestDataFiles';
+  manifestPath: string;
+  files: ManifestDataFileEntry[];
+  error?: string;
+}
+
 export type PanelMessage =
   | SetLoadingMessage
   | SetIdleMessage
@@ -66,7 +171,12 @@ export type PanelMessage =
   | LoadManifestFileMessage
   | LoadPreviewMessage
   | LoadQueryResultMessage
-  | ShowCapBannerMessage;
+  | ShowCapBannerMessage
+  | LoadTableOverviewMessage
+  | LoadDataPreviewMessage
+  | LoadConnectionDashboardMessage
+  | LoadMetadataArchitectureMessage
+  | LoadManifestDataFilesMessage;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────
 
@@ -114,6 +224,42 @@ export interface CancelQueryMessage {
   type: 'cancelQuery';
 }
 
+export interface OpenTableOverviewMessage {
+  type: 'openTableOverview';
+  resourcePath: string;
+}
+
+export interface OpenMetadataPanelMessage {
+  type: 'openMetadataPanel';
+  resourcePath: string;
+}
+
+export interface OpenMetadataArchitectureMessage {
+  type: 'openMetadataArchitecture';
+  resourcePath: string;
+}
+
+export interface OpenConnectionDashboardMessage {
+  type: 'openConnectionDashboard';
+  connectionId: string;
+}
+
+export interface FetchDataPreviewMessage {
+  type: 'fetchDataPreview';
+  tablePath: string;
+}
+
+export interface SelectArchitectureSnapshotMessage {
+  type: 'selectArchitectureSnapshot';
+  tablePath: string;
+  snapshotId: string;
+}
+
+export interface FetchManifestDataFilesMessage {
+  type: 'fetchManifestDataFiles';
+  manifestPath: string;
+}
+
 export type WebviewMessage =
   | WebviewReadyMessage
   | RetryMessage
@@ -123,4 +269,12 @@ export type WebviewMessage =
   | OpenParquetPreviewMessage
   | OpenAdHocQueryMessage
   | RunQueryMessage
-  | CancelQueryMessage;
+  | CancelQueryMessage
+  | OpenTableOverviewMessage
+  | OpenMetadataPanelMessage
+  | OpenMetadataArchitectureMessage
+  | OpenConnectionDashboardMessage
+  | FetchDataPreviewMessage
+  | SelectArchitectureSnapshotMessage
+  | FetchManifestDataFilesMessage;
+
