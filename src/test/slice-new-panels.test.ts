@@ -29,6 +29,7 @@ import { getTableOverviewHtml } from '../panels/html/tableOverview.js';
 import { getConnectionDashboardHtml } from '../panels/html/connectionDashboard.js';
 import { getMetadataArchitectureHtml } from '../panels/html/metadataArchitecture.js';
 import { makeTableItem, makeMetadataFolderItem, makeConnectionItem } from '../tree/types.js';
+import { analyzeQuery } from '../query/sqlAnalyzer.js';
 
 interface PostedMessage {
   type: string;
@@ -508,6 +509,235 @@ async function runTests() {
     assert.strictEqual(lastMsg.tables[0].name, 'dogtable1', 'Table name is dogtable1');
     assert.strictEqual(lastMsg.tables[0].path, 's3://rk-iceberg/dogs/testdogs.db/dogtable1');
     assert.strictEqual(lastMsg.tables[0].schema, 'dogs.testdogs.db', 'Nested namespace formatted as dogs.testdogs.db');
+  });
+
+  // ─── SQL Analyzer & Ad-Hoc Query Budgeting ─────────────────────────────────
+
+  await test('SQL Analyzer: parses simple scan and extracts LIMIT', () => {
+    const res1 = analyzeQuery('SELECT * FROM data LIMIT 100');
+    assert.strictEqual(res1.isSimpleScan, true);
+    assert.strictEqual(res1.requestedLimit, 100);
+    assert.strictEqual(res1.hasFilterOrTransform, false);
+
+    const res2 = analyzeQuery('SELECT id, name FROM events');
+    assert.strictEqual(res2.isSimpleScan, true);
+    assert.strictEqual(res2.requestedLimit, undefined);
+    assert.strictEqual(res2.hasFilterOrTransform, false);
+  });
+
+  await test('SQL Analyzer: identifies WHERE, GROUP BY, ORDER BY, and aggregates', () => {
+    const resWhere = analyzeQuery('SELECT * FROM data WHERE id > 10 LIMIT 50');
+    assert.strictEqual(resWhere.isSimpleScan, false);
+    assert.strictEqual(resWhere.requestedLimit, 50);
+    assert.strictEqual(resWhere.hasFilterOrTransform, true);
+
+    const resGroup = analyzeQuery('SELECT id, count(*) FROM data GROUP BY id');
+    assert.strictEqual(resGroup.isSimpleScan, false);
+    assert.strictEqual(resGroup.hasFilterOrTransform, true);
+
+    const resOrder = analyzeQuery('SELECT * FROM data ORDER BY ts DESC LIMIT 10');
+    assert.strictEqual(resOrder.isSimpleScan, false);
+    assert.strictEqual(resOrder.requestedLimit, 10);
+    assert.strictEqual(resOrder.hasFilterOrTransform, true);
+
+    const resAgg = analyzeQuery('SELECT count(*) FROM data');
+    assert.strictEqual(resAgg.isSimpleScan, false);
+    assert.strictEqual(resAgg.hasFilterOrTransform, true);
+  });
+
+  await test('Ad-hoc query resolution: stops file accumulation when single file has enough rows for simple scan', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const files50: DataFileRow[] = [];
+    for (let i = 0; i < 50; i++) {
+      files50.push({
+        status: 1,
+        filePath: `s3://warehouse/db/events/data/file_${i}.parquet`,
+        fileFormat: 'PARQUET',
+        recordCount: 200,
+        fileSizeBytes: 1024 * 100,
+      });
+    }
+    const qe = makeQueryEngine({
+      async parseManifestFile(): Promise<DataFileRow[]> {
+        return files50;
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    const res = await (manager as any).resolveTableParquetFiles(
+      handle,
+      's3://warehouse/db/events',
+      adapter,
+      'SELECT * FROM data LIMIT 100',
+    );
+
+    assert.ok(typeof res !== 'string', 'Resolution succeeded');
+    assert.strictEqual(res.parquetPaths.length, 1, 'Only 1 file needed since it has 200 rows >= 100 limit');
+    assert.strictEqual(res.accumulatedRecords, 200);
+    assert.strictEqual(res.isSampled, true);
+    assert.strictEqual(res.totalDataFiles, 50);
+  });
+
+  await test('Ad-hoc query resolution: accumulates micro-files until row target is met', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const microFiles: DataFileRow[] = [];
+    for (let i = 0; i < 50; i++) {
+      microFiles.push({
+        status: 1,
+        filePath: `s3://warehouse/db/events/data/micro_${i}.parquet`,
+        fileFormat: 'PARQUET',
+        recordCount: 5,
+        fileSizeBytes: 1024 * 10,
+      });
+    }
+    const qe = makeQueryEngine({
+      async parseManifestFile(): Promise<DataFileRow[]> {
+        return microFiles;
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    const res = await (manager as any).resolveTableParquetFiles(
+      handle,
+      's3://warehouse/db/events',
+      adapter,
+      'SELECT * FROM data LIMIT 100',
+    );
+
+    assert.ok(typeof res !== 'string', 'Resolution succeeded');
+    assert.strictEqual(res.parquetPaths.length, 20, 'Accumulated 20 files (20 * 5 = 100 rows)');
+    assert.strictEqual(res.accumulatedRecords, 100);
+    assert.strictEqual(res.isSampled, true);
+  });
+
+  await test('Ad-hoc query resolution: sorts smallest files first for simple scan', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const mixedFiles: DataFileRow[] = [
+      {
+        status: 1,
+        filePath: 's3://warehouse/db/events/data/huge_compaction.parquet',
+        fileFormat: 'PARQUET',
+        recordCount: 50000,
+        fileSizeBytes: 40 * 1024 * 1024, // 40 MB
+      },
+      {
+        status: 1,
+        filePath: 's3://warehouse/db/events/data/small_recent.parquet',
+        fileFormat: 'PARQUET',
+        recordCount: 500,
+        fileSizeBytes: 200 * 1024, // 200 KB
+      },
+      {
+        status: 1,
+        filePath: 's3://warehouse/db/events/data/medium.parquet',
+        fileFormat: 'PARQUET',
+        recordCount: 2000,
+        fileSizeBytes: 2 * 1024 * 1024, // 2 MB
+      },
+    ];
+    const qe = makeQueryEngine({
+      async parseManifestFile(): Promise<DataFileRow[]> {
+        return mixedFiles;
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    const res = await (manager as any).resolveTableParquetFiles(
+      handle,
+      's3://warehouse/db/events',
+      adapter,
+      'SELECT * FROM data LIMIT 100',
+    );
+
+    assert.ok(typeof res !== 'string', 'Resolution succeeded');
+    assert.strictEqual(res.parquetPaths.length, 1, 'Smallest file alone satisfied the 100-row limit');
+    assert.strictEqual(res.parquetPaths[0], 's3://warehouse/db/events/data/small_recent.parquet', 'Selected 200KB file first');
+    assert.strictEqual(res.accumulatedBytes, 200 * 1024);
+  });
+
+  await test('Ad-hoc query resolution: halts file accumulation when byte budget ceiling (50MB) is reached', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const largeFiles: DataFileRow[] = [];
+    for (let i = 0; i < 20; i++) {
+      largeFiles.push({
+        status: 1,
+        filePath: `s3://warehouse/db/events/data/part_${i}.parquet`,
+        fileFormat: 'PARQUET',
+        recordCount: 100,
+        fileSizeBytes: 10 * 1024 * 1024, // 10 MB each
+      });
+    }
+    const qe = makeQueryEngine({
+      async parseManifestFile(): Promise<DataFileRow[]> {
+        return largeFiles;
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    const res = await (manager as any).resolveTableParquetFiles(
+      handle,
+      's3://warehouse/db/events',
+      adapter,
+      'SELECT id, count(*) FROM data GROUP BY id',
+    );
+
+    assert.ok(typeof res !== 'string', 'Resolution succeeded');
+    assert.strictEqual(res.parquetPaths.length, 5, 'Stopped after 5 files (5 * 10MB = 50MB ceiling)');
+    assert.strictEqual(res.accumulatedBytes, 50 * 1024 * 1024);
+  });
+
+  await test('Ad-hoc query panel: displays informative sampling and limit banner in webview', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter({
+      async fetchFileToTemp(_handle: any, p: string) {
+        return `/tmp/${path.basename(p)}`;
+      },
+      async deleteTemp() {},
+    });
+    const qe = makeQueryEngine({
+      async parseManifestFile(): Promise<DataFileRow[]> {
+        return [
+          { status: 1, filePath: 's3://warehouse/db/events/data/f1.parquet', fileFormat: 'PARQUET', recordCount: 1000, fileSizeBytes: 1024 * 500 },
+          { status: 1, filePath: 's3://warehouse/db/events/data/f2.parquet', fileFormat: 'PARQUET', recordCount: 1000, fileSizeBytes: 1024 * 500 },
+        ];
+      },
+      async runAdHocQuery(): Promise<QueryResult> {
+        return {
+          rows: [{ id: 1 }],
+          columnNames: ['id'],
+          rowCount: 1,
+          wasCapped: false,
+          durationMs: 10,
+        };
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    await manager.openAdHocQueryPanel('s3://warehouse/db/events', handle, adapter);
+    const key = panelRegistryKey(PanelType.AdHocQuery, 's3://warehouse/db/events');
+    const record = (manager as any).registry.get(key);
+    assert.ok(record, 'Ad-hoc query panel registered');
+
+    const messages: PostedMessage[] = [];
+    record.gate.post = (msg: PostedMessage) => messages.push(msg);
+
+    await (manager as any).executeAdHocQuery(
+      record.gate,
+      key,
+      's3://warehouse/db/events',
+      handle,
+      adapter,
+      'SELECT * FROM data LIMIT 100',
+    );
+
+    const bannerMsg = messages.find(m => m.type === 'showCapBanner') as any;
+    assert.ok(bannerMsg, 'showCapBanner message sent');
+    assert.ok(bannerMsg.message.includes('Read 1 file(s)'), `Banner says read 1 file: ${bannerMsg.message}`);
+    assert.ok(bannerMsg.message.includes('satisfy LIMIT 100'), `Banner mentions limit 100: ${bannerMsg.message}`);
   });
 
   // ─── Tree Node Commands Integration ────────────────────────────────────────

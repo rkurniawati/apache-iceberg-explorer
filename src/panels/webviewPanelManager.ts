@@ -39,6 +39,7 @@ import type {
 import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
 import type { QueryEngine, ManifestEntryRow, DataFileRow } from '../query/index.js';
 import { isQueryError } from '../query/index.js';
+import { analyzeQuery } from '../query/sqlAnalyzer.js';
 
 // ---------------------------------------------------------------------------
 // User-facing error strings — one per error class (design.md §2.5.2, FR-20)
@@ -57,6 +58,17 @@ const QUERY_ERROR_MESSAGES: Record<string, string> = {
   'cancelled':     'Operation cancelled.',
   'internal':      'An unexpected error occurred. Please try again.',
 };
+
+export interface ResolvedTableParquet {
+  parquetPaths: string[];
+  tableName: string;
+  totalDataFiles: number;
+  accumulatedRecords: number;
+  accumulatedBytes: number;
+  isSampled: boolean;
+  requestedLimit?: number;
+  isSimpleScan: boolean;
+}
 
 // ---------------------------------------------------------------------------
 // Webview ready gate — prevents dropped postMessage calls on fast error paths
@@ -682,12 +694,13 @@ export class WebviewPanelManager {
     // 1. Resolve Parquet file(s) to fetch
     let parquetPathsToFetch: string[];
     let tableName: string | undefined;
+    let resolveDetails: ResolvedTableParquet | undefined;
 
     if (resourcePath.toLowerCase().endsWith('.parquet')) {
       parquetPathsToFetch = [resourcePath];
     } else {
       tableName = lastPathSegment(resourcePath).replace(/[^a-zA-Z0-9_]/g, '_');
-      const resolveResult = await this.resolveTableParquetFiles(handle, resourcePath, adapter);
+      const resolveResult = await this.resolveTableParquetFiles(handle, resourcePath, adapter, sql);
       if (typeof resolveResult === 'string') {
         gate.post({
           type: 'setState',
@@ -702,22 +715,30 @@ export class WebviewPanelManager {
       if (resolveResult.tableName) {
         tableName = resolveResult.tableName;
       }
+      resolveDetails = resolveResult;
     }
 
-    // 2. Fetch Parquet files to temp
+    // 2. Fetch Parquet files to temp in concurrent batches of 4
     const tempFilePaths: string[] = [];
-    for (const p of parquetPathsToFetch) {
-      const fetchResult = await adapter.fetchFileToTemp(handle, p);
-      if (isStorageError(fetchResult)) {
-        for (const t of tempFilePaths) {
-          void adapter.deleteTemp(t);
+    const BATCH_SIZE = 4;
+    for (let i = 0; i < parquetPathsToFetch.length; i += BATCH_SIZE) {
+      const batch = parquetPathsToFetch.slice(i, i + BATCH_SIZE);
+      const batchResults = await Promise.all(
+        batch.map((p) => adapter.fetchFileToTemp(handle, p)),
+      );
+      for (let j = 0; j < batchResults.length; j++) {
+        const fetchResult = batchResults[j];
+        if (isStorageError(fetchResult)) {
+          for (const t of tempFilePaths) {
+            void adapter.deleteTemp(t);
+          }
+          const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
+          gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
+          this.logger.error(`Panel error: type=adHocQuery file=${batch[j]} errorClass=${fetchResult.class}`);
+          return;
         }
-        const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
-        gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
-        this.logger.error(`Panel error: type=adHocQuery file=${p} errorClass=${fetchResult.class}`);
-        return;
+        tempFilePaths.push(fetchResult);
       }
-      tempFilePaths.push(fetchResult);
     }
 
     this.tempFiles.set(key, tempFilePaths);
@@ -742,6 +763,12 @@ export class WebviewPanelManager {
       gate.post({ type: 'loadQueryResult', result });
       if (result.wasCapped) {
         gate.post({ type: 'showCapBanner', message: 'Results capped at 10,000 rows.' });
+      } else if (resolveDetails && resolveDetails.isSampled) {
+        const sizeMb = (resolveDetails.accumulatedBytes / (1024 * 1024)).toFixed(1);
+        const msg = resolveDetails.isSimpleScan && resolveDetails.requestedLimit
+          ? `Read ${resolveDetails.parquetPaths.length} file(s) (${resolveDetails.accumulatedRecords.toLocaleString()} rows, ${sizeMb} MB) to satisfy LIMIT ${resolveDetails.requestedLimit}.`
+          : `Query sampled ${resolveDetails.parquetPaths.length} of ${resolveDetails.totalDataFiles} data files (${resolveDetails.accumulatedRecords.toLocaleString()} rows, ${sizeMb} MB). Results capped at 10,000 rows.`;
+        gate.post({ type: 'showCapBanner', message: msg });
       }
       this.logger.info(`Panel loaded: type=adHocQuery resource=${resourcePath} rows=${result.rowCount} capped=${result.wasCapped}`);
     } catch (err: unknown) {
@@ -754,15 +781,16 @@ export class WebviewPanelManager {
 
   /**
    * Resolves active Parquet data files for a table from its current metadata and manifests.
+   * Uses SQL analysis, row-count targeting, and byte budgeting to prevent excessive S3 downloads.
    * If the path points to a namespace/database directory containing tables, it resolves
    * the child table automatically.
-   * Returns an array of Parquet file paths and the resolved table name, or an error message string.
    */
   private async resolveTableParquetFiles(
     handle: ActiveConnectionHandle,
     tablePath: string,
     adapter: StorageAdapter,
-  ): Promise<{ parquetPaths: string[]; tableName?: string } | string> {
+    sql?: string,
+  ): Promise<ResolvedTableParquet | string> {
     const engine = this.queryEngine;
     if (!engine) {
       return 'Query engine not available.';
@@ -839,8 +867,30 @@ export class WebviewPanelManager {
       return `No data manifests found in snapshot ${snapshot['snapshot-id']}.`;
     }
 
-    // 6. Parse manifests to collect active Parquet data files
-    const parquetPaths: string[] = [];
+    // 6. Parse manifests to collect active Parquet data files with budgeting
+    const analysis = sql ? analyzeQuery(sql) : { isSimpleScan: true, hasFilterOrTransform: false, requestedLimit: 100 };
+    const MAX_BYTES_BUDGET = 50 * 1024 * 1024; // 50 MB
+    const MAX_FILES_CEILING = 25;
+    const SINGLE_FILE_LIMIT = 50 * 1024 * 1024;
+    const targetRecords = analysis.isSimpleScan
+      ? (analysis.requestedLimit ?? 10_000)
+      : Math.min(Math.max((analysis.requestedLimit ?? 10_000) * 5, 20_000), 100_000);
+
+    let estimatedTotalDataFiles = 0;
+    for (const dm of dataManifests) {
+      const count = ((dm as any).addedDataFilesCount ?? (dm as any).addedFilesCount ?? 0) +
+                    ((dm as any).existingDataFilesCount ?? (dm as any).existingFilesCount ?? 0);
+      estimatedTotalDataFiles += count;
+    }
+
+    interface CandidateFile {
+      filePath: string;
+      recordCount: number;
+      fileSizeBytes: number;
+    }
+    const candidateFiles: CandidateFile[] = [];
+    let parsedActiveFilesCount = 0;
+
     for (const dm of dataManifests) {
       const manifestTemp = await adapter.fetchFileToTemp(handle, dm.manifestPath);
       if (isStorageError(manifestTemp)) {
@@ -852,25 +902,72 @@ export class WebviewPanelManager {
           for (const df of parsed) {
             // status: 0 = EXISTING, 1 = ADDED, 2 = DELETED
             if (df.filePath.toLowerCase().endsWith('.parquet') && df.status !== 2) {
-              parquetPaths.push(df.filePath);
+              parsedActiveFilesCount++;
+              candidateFiles.push({
+                filePath: df.filePath,
+                recordCount: df.recordCount ?? 0,
+                fileSizeBytes: df.fileSizeBytes ?? 0,
+              });
             }
           }
         }
       } finally {
         void adapter.deleteTemp(manifestTemp);
       }
-      if (parquetPaths.length >= 10) {
+
+      // Early stop if candidates already meet target records
+      const totalCandidateRecords = candidateFiles.reduce((sum, f) => sum + f.recordCount, 0);
+      if (totalCandidateRecords >= targetRecords && candidateFiles.length >= 1) {
         break;
       }
     }
 
-    if (parquetPaths.length === 0) {
+    if (candidateFiles.length === 0) {
       return 'No active Parquet data files found for table.';
     }
 
+    // For simple scans, sort candidate files by size ascending (smallest files first)
+    // to minimize download bandwidth and avoid fetching large compaction files.
+    const pool = [...candidateFiles];
+    if (analysis.isSimpleScan) {
+      pool.sort((a, b) => a.fileSizeBytes - b.fileSizeBytes);
+    }
+
+    const selectedFiles: CandidateFile[] = [];
+    let accumulatedRecords = 0;
+    let accumulatedBytes = 0;
+
+    for (const file of pool) {
+      // If a single file exceeds 50MB and we already have alternative selected files, skip it
+      if (file.fileSizeBytes > SINGLE_FILE_LIMIT && selectedFiles.length > 0) {
+        continue;
+      }
+
+      selectedFiles.push(file);
+      accumulatedRecords += file.recordCount;
+      accumulatedBytes += file.fileSizeBytes;
+
+      if (
+        (accumulatedRecords >= targetRecords && selectedFiles.length >= 1) ||
+        accumulatedBytes >= MAX_BYTES_BUDGET ||
+        selectedFiles.length >= MAX_FILES_CEILING
+      ) {
+        break;
+      }
+    }
+
+    const totalCount = Math.max(estimatedTotalDataFiles, parsedActiveFilesCount, candidateFiles.length);
+    const isSampled = selectedFiles.length < totalCount;
+
     return {
-      parquetPaths,
+      parquetPaths: selectedFiles.map(f => f.filePath),
       tableName: lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_'),
+      totalDataFiles: totalCount,
+      accumulatedRecords,
+      accumulatedBytes,
+      isSampled,
+      requestedLimit: analysis.requestedLimit,
+      isSimpleScan: analysis.isSimpleScan,
     };
   }
 
