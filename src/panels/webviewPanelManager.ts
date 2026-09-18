@@ -983,6 +983,7 @@ export class WebviewPanelManager {
     saveConnection:     (config: ConnectionConfig, creds: { accessKey: string; secretKey: string }) => Promise<void>,
     activateConnection: (id: string) => Promise<ActiveConnectionHandle | StorageError>,
     deleteConnection:   (id: string) => Promise<void>,
+    getExistingConfigs?: () => ConnectionConfig[],
   ): Promise<void> {
     const key = panelRegistryKey(PanelType.Settings, 'settings');
     const existing = this.registry.get(key);
@@ -990,6 +991,13 @@ export class WebviewPanelManager {
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info('Panel revealed (already open): type=settings resource=settings');
+      if (getExistingConfigs) {
+        const currentConns = getExistingConfigs().map((c) => ({ id: c.id, label: c.label }));
+        void existing.panel.webview.postMessage({
+          type: 'setExistingConnections',
+          connections: currentConns,
+        });
+      }
       // If an editConfig was provided, post the editConnection message to pre-fill
       if (editConfig) {
         void existing.panel.webview.postMessage({
@@ -1008,7 +1016,8 @@ export class WebviewPanelManager {
       { enableScripts: true },
     );
 
-    panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource);
+    const initialConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : [];
+    panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns);
 
     // Cast to PanelRecord — settings panels carry no resourcePath or handle;
     // use sentinel values to satisfy the interface without widening the type.
@@ -1054,7 +1063,8 @@ export class WebviewPanelManager {
             };
             try {
               await saveConnection(config, creds);
-              void panel.webview.postMessage({ type: 'saveSuccess' });
+              const currentConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : undefined;
+              void panel.webview.postMessage({ type: 'saveSuccess', connections: currentConns });
             } catch (err: unknown) {
               const message = isStorageError(err)
                 ? err.message
@@ -1079,8 +1089,9 @@ export class WebviewPanelManager {
           case 'deleteConnection': {
             this.logger.info('Settings panel: deleteConnection');
             try {
-              await deleteConnection(String(msg.id ?? ''));
-              void panel.webview.postMessage({ type: 'deleteSuccess' });
+              const idToDelete = String(msg.id ?? '');
+              await deleteConnection(idToDelete);
+              void panel.webview.postMessage({ type: 'deleteSuccess', id: idToDelete });
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : 'Failed to delete connection.';
               void panel.webview.postMessage({ type: 'deleteError', message });

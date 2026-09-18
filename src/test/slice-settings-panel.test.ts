@@ -17,6 +17,7 @@ import type { StorageError } from '../storage/errors';
 import type { ILogger } from '../extension';
 import { WebviewPanelManager } from '../panels/webviewPanelManager';
 import { validateConnectionInput } from '../connection/validation';
+import { ConnectionManager } from '../connection/connectionManager';
 
 // ---------------------------------------------------------------------------
 // The vscode mock (via test-setup.ts → __mocks__/vscode.ts) exposes
@@ -373,6 +374,187 @@ void (async () => {
       },
     );
     assert.strictEqual(valid.valid, true, `expected valid: true, got ${JSON.stringify(valid)}`);
+  });
+
+  // Helper for ConnectionManager testing
+  function makeFakeContext(initialConfigs: ConnectionConfig[] = []) {
+    const store = new Map<string, any>();
+    store.set('icebergExplorer.connections', initialConfigs);
+    const secrets = new Map<string, string>();
+    return {
+      globalState: {
+        get: (key: string) => store.get(key),
+        update: async (key: string, val: any) => { store.set(key, val); },
+      },
+      secrets: {
+        get: async (key: string) => secrets.get(key),
+        store: async (key: string, val: string) => { secrets.set(key, val); },
+        delete: async (key: string) => { secrets.delete(key); },
+      },
+    } as any;
+  }
+
+  // 11. validateConnectionInput rejects empty or whitespace-only connection name
+  await run('validateConnectionInput rejects empty or whitespace-only connection name', async () => {
+    const res = validateConnectionInput(
+      {
+        id: 'c1',
+        label: '   ',
+        connectionType: 'local',
+        warehousePath: '/tmp/iceberg',
+        sslVerification: true,
+        savedAt: Date.now(),
+      },
+      { accessKey: '', secretKey: '' },
+    );
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.ok(res.errors.some((e) => e.field === 'label' && e.message === 'Connection name is required.'));
+    }
+  });
+
+  // 12. validateConnectionInput rejects duplicate connection name (case-insensitive, trimmed)
+  await run('validateConnectionInput rejects duplicate connection name (case-insensitive, trimmed)', async () => {
+    const existing: ConnectionConfig[] = [
+      {
+        id: 'conn-1',
+        label: 'AWS',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 1000,
+      },
+    ];
+    const res = validateConnectionInput(
+      {
+        id: 'conn-2',
+        label: '  aws  ',
+        connectionType: 's3',
+        warehousePath: 's3://other-bucket',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 2000,
+      },
+      { accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' },
+      existing,
+    );
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.ok(res.errors.some((e) => e.field === 'label' && e.message.includes('already exists')));
+    }
+  });
+
+  // 13. validateConnectionInput allows editing existing connection without name collision error
+  await run('validateConnectionInput allows editing existing connection without name collision error', async () => {
+    const existing: ConnectionConfig[] = [
+      {
+        id: 'conn-1',
+        label: 'AWS',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 1000,
+      },
+    ];
+    const res = validateConnectionInput(
+      {
+        id: 'conn-1',
+        label: 'AWS',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg-updated',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 2000,
+      },
+      { accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' },
+      existing,
+    );
+    assert.strictEqual(res.valid, true);
+  });
+
+  // 14. ConnectionManager.saveConnection prevents saving connection with duplicate name
+  await run('ConnectionManager.saveConnection prevents saving connection with duplicate name', async () => {
+    const ctx = makeFakeContext([
+      {
+        id: 'c1',
+        label: 'aws',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 1000,
+      },
+    ]);
+    const cm = new ConnectionManager(ctx, testLogger);
+    const result = await cm.saveConnection(
+      {
+        label: 'AWS',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg-2',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: 'AKIAIOSFODNN7EXAMPLE', secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY' },
+    );
+    assert.ok(result instanceof Error, 'Expected saveConnection to return an Error for duplicate name');
+    assert.ok(result.message.includes('already exists'));
+  });
+
+  // 15. ConnectionManager sanitizes pre-existing duplicate connections from storage
+  await run('ConnectionManager sanitizes pre-existing duplicate connections from storage', async () => {
+    const ctx = makeFakeContext([
+      {
+        id: 'c1',
+        label: 'aws',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 1000,
+      },
+      {
+        id: 'c2',
+        label: 'aws',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: 2000,
+      },
+    ]);
+    const cm = new ConnectionManager(ctx, testLogger);
+    const configs = cm.listConnections();
+    assert.strictEqual(configs.length, 1, 'Exact duplicate connections should be pruned to 1');
+    assert.strictEqual(configs[0].id, 'c2', 'Newer connection should be preserved');
+  });
+
+  // 16. saveConnection in settings panel receives saveError when backend returns duplicate name error
+  await run('saveConnection in settings panel posts saveError when duplicate name is rejected', async () => {
+    const failingSave = async () => {
+      throw new Error('Validation failed: label: A connection with the name "aws" already exists.');
+    };
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, failingSave, noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 's3',
+        label: 'aws',
+        warehousePath: 's3://my-bucket/prefix',
+        region: 'us-east-1',
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+        sslVerification: true,
+      });
+
+      const msgs = getMessages();
+      const errorMsg = msgs.find((m) => m.type === 'saveError');
+      assert.ok(errorMsg, `expected saveError in messages: ${JSON.stringify(msgs)}`);
+      assert.ok(String(errorMsg!.message).includes('already exists'));
+    });
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

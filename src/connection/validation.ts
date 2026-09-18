@@ -16,8 +16,28 @@ export type ValidationResult =
 export function validateConnectionInput(
   config: ConnectionConfig,
   credentials: { accessKey: string; secretKey: string },
+  existingConfigs?: ConnectionConfig[],
 ): ValidationResult {
   const errors: FieldError[] = [];
+
+  // Connection label must be non-empty and unique
+  if (!config.label || config.label.trim() === '') {
+    errors.push({
+      field: 'label',
+      message: 'Connection name is required.',
+    });
+  } else if (existingConfigs) {
+    const trimmedLabel = config.label.trim().toLowerCase();
+    const isDuplicate = existingConfigs.some(
+      (c) => c.id !== config.id && c.label.trim().toLowerCase() === trimmedLabel,
+    );
+    if (isDuplicate) {
+      errors.push({
+        field: 'label',
+        message: `A connection with the name "${config.label.trim()}" already exists.`,
+      });
+    }
+  }
 
   // CM-V1 — connectionType must be "s3" or "local"
   if (config.connectionType !== 's3' && config.connectionType !== 'local') {

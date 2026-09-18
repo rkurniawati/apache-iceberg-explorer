@@ -83,12 +83,15 @@ export class ConnectionManager {
   ): Promise<string | Error> {
     const fullConfig: ConnectionConfig = {
       ...config,
+      label: config.label.trim(),
       id: config.id ?? crypto.randomUUID(),
       savedAt: Date.now(),
     };
 
-    // CM-V1 through CM-V5 (T-12)
-    const validation = validateConnectionInput(fullConfig, credentials);
+    const configs = this._readConfigs();
+
+    // CM-V1 through CM-V5 and unique connection name validation
+    const validation = validateConnectionInput(fullConfig, credentials, configs);
     if (!validation.valid) {
       const msg = validation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
       this._logger.warn(`ConnectionManager.saveConnection: validation failed — ${msg}`);
@@ -112,7 +115,6 @@ export class ConnectionManager {
     }
 
     // Persist non-secret config to globalState
-    const configs = this._readConfigs();
     const existingIndex = configs.findIndex((c) => c.id === fullConfig.id);
     if (existingIndex >= 0) {
       configs[existingIndex] = fullConfig;
@@ -215,9 +217,80 @@ export class ConnectionManager {
   // -------------------------------------------------------------------------
 
   private _readConfigs(): ConnectionConfig[] {
-    return (
-      (this._globalState.get<ConnectionConfig[]>(GLOBAL_STATE_KEY)) ?? []
-    );
+    const raw = (this._globalState.get<ConnectionConfig[]>(GLOBAL_STATE_KEY)) ?? [];
+    return this._sanitizeDuplicates(raw);
+  }
+
+  /**
+   * Sanitizes pre-existing configurations stored in globalState to ensure
+   * no duplicate connection names exist. Exact duplicates are pruned and
+   * distinct connections with collision names are disambiguated.
+   */
+  private _sanitizeDuplicates(rawConfigs: ConnectionConfig[]): ConnectionConfig[] {
+    if (rawConfigs.length <= 1) return rawConfigs;
+
+    const seenLabels = new Set<string>();
+    let hasDuplicates = false;
+    for (const c of rawConfigs) {
+      const lower = c.label.trim().toLowerCase();
+      if (seenLabels.has(lower)) {
+        hasDuplicates = true;
+        break;
+      }
+      seenLabels.add(lower);
+    }
+
+    if (!hasDuplicates) {
+      return rawConfigs;
+    }
+
+    const sanitized: ConnectionConfig[] = [];
+    const evictedIds: string[] = [];
+    // Sort by savedAt descending so we preserve the newest for exact duplicates
+    const sorted = [...rawConfigs].sort((a, b) => b.savedAt - a.savedAt);
+
+    for (const config of sorted) {
+      const trimmedLabel = config.label.trim();
+      const lower = trimmedLabel.toLowerCase();
+
+      const existing = sanitized.find((c) => c.label.trim().toLowerCase() === lower);
+      if (!existing) {
+        sanitized.push(config);
+      } else {
+        // If identical type and warehousePath, evict older duplicate
+        if (
+          existing.connectionType === config.connectionType &&
+          existing.warehousePath.trim() === config.warehousePath.trim()
+        ) {
+          evictedIds.push(config.id);
+          this._logger.warn(
+            `ConnectionManager: pruned duplicate connection: id=${config.id} label="${config.label}"`,
+          );
+        } else {
+          // Different connection: disambiguate name
+          let counter = 2;
+          let newName = `${trimmedLabel} (${counter})`;
+          while (sanitized.some((c) => c.label.trim().toLowerCase() === newName.toLowerCase())) {
+            counter++;
+            newName = `${trimmedLabel} (${counter})`;
+          }
+          this._logger.warn(
+            `ConnectionManager: disambiguated duplicate connection name: id=${config.id} "${config.label}" -> "${newName}"`,
+          );
+          sanitized.push({
+            ...config,
+            label: newName,
+          });
+        }
+      }
+    }
+
+    void this._globalState.update(GLOBAL_STATE_KEY, sanitized);
+    for (const id of evictedIds) {
+      void this._secrets.delete(`${SECRET_KEY_PREFIX}${id}`);
+    }
+
+    return sanitized;
   }
 
   /**

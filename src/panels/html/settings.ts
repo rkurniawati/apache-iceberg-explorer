@@ -25,6 +25,7 @@
 export function getSettingsHtml(
   nonce: string,
   cspSource: string,
+  initialConnections: Array<{ id: string; label: string }> = [],
 ): string {
   return `<!DOCTYPE html>
 <html lang="en">
@@ -206,6 +207,9 @@ export function getSettingsHtml(
 
   const vscode = acquireVsCodeApi();
 
+  // Existing connections for duplicate name validation
+  var existingConnections = ${JSON.stringify(initialConnections.map((c) => ({ id: c.id, label: c.label }))).replace(/</g, '\\u003c')};
+
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const connType     = /** @type {HTMLSelectElement}   */ (document.getElementById('conn-type'));
   const connLabel    = /** @type {HTMLInputElement}    */ (document.getElementById('conn-label'));
@@ -292,6 +296,15 @@ export function getSettingsHtml(
     if (!label) {
       showError('err-label', 'Connection name is required.');
       valid = false;
+    } else {
+      var currentId = connId.value || '';
+      var isDuplicate = existingConnections.some(function(c) {
+        return c.id !== currentId && c.label.trim().toLowerCase() === label.toLowerCase();
+      });
+      if (isDuplicate) {
+        showError('err-label', 'A connection with the name "' + label + '" already exists.');
+        valid = false;
+      }
     }
     if (!path) {
       showError('err-path', isS3 ? 'S3 URI is required.' : 'Warehouse path is required.');
@@ -351,14 +364,31 @@ export function getSettingsHtml(
     secretKey.value = '';
   });
 
+  // Clear connection label error when the user types
+  connLabel.addEventListener('input', function () {
+    var el = document.getElementById('err-label');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+
   // ── Messages from extension host ─────────────────────────────────────────
   window.addEventListener('message', function (event) {
     var msg = event.data;
     if (!msg || !msg.type) return;
 
     switch (msg.type) {
+      case 'setExistingConnections':
+        if (Array.isArray(msg.connections)) {
+          existingConnections = msg.connections;
+        }
+        break;
       case 'saveSuccess':
         showBanner('Connection saved and activated.', false);
+        if (Array.isArray(msg.connections)) {
+          existingConnections = msg.connections;
+        }
         // Reset form to "New Connection" state after a successful save
         connId.value = '';
         if (formHeading) formHeading.textContent = 'New Connection';
@@ -366,6 +396,15 @@ export function getSettingsHtml(
         break;
       case 'saveError':
         showBanner(msg.message || 'Failed to save connection.', true);
+        if (msg.message && (msg.message.includes('label:') || msg.message.toLowerCase().includes('already exists'))) {
+          var labelMsg = msg.message;
+          if (labelMsg.includes('label:')) {
+            labelMsg = labelMsg.split('label:')[1].trim();
+          } else if (labelMsg.startsWith('Validation failed:')) {
+            labelMsg = labelMsg.replace('Validation failed:', '').trim();
+          }
+          showError('err-label', labelMsg);
+        }
         break;
       case 'activateSuccess':
         showBanner('Connection activated.', false);
@@ -375,6 +414,9 @@ export function getSettingsHtml(
         break;
       case 'deleteSuccess':
         showBanner('Connection deleted.', false);
+        if (msg.id) {
+          existingConnections = existingConnections.filter(function(c) { return c.id !== msg.id; });
+        }
         break;
       case 'deleteError':
         showBanner(msg.message || 'Could not delete connection.', true);

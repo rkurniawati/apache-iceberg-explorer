@@ -129,6 +129,7 @@ export function activate(context: vscode.ExtensionContext): void {
           void p.then(() => treeProvider.setConnections(connectionManager.listConnections()));
           return p;
         },
+        () => connectionManager.listConnections(),
       );
     }),
   );
