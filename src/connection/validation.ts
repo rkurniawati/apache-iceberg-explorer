@@ -78,6 +78,16 @@ export function validateConnectionInput(
     if (!credentials.secretKey || credentials.secretKey.trim() === '') {
       errors.push({ field: 'secretKey', message: 'Secret key is required for S3 connections.' });
     }
+
+    // CM-V5b — warehousePath must be non-empty and a valid S3 URI
+    if (!config.warehousePath || config.warehousePath.trim() === '') {
+      errors.push({ field: 'warehousePath', message: 'Warehouse path is required for S3 connections.' });
+    } else if (!/^s3[an]?:\/\/[^/]+/i.test(config.warehousePath.trim())) {
+      errors.push({
+        field: 'warehousePath',
+        message: 'Warehouse path must be a valid S3 URI (e.g. s3://bucket/warehouse-path).',
+      });
+    }
   }
 
   if (config.connectionType === 'local') {

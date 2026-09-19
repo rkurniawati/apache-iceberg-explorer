@@ -159,6 +159,9 @@ export function getSettingsHtml(
   <div class="field">
     <label for="warehouse-path" id="warehouse-path-label">Warehouse path</label>
     <input id="warehouse-path" type="text" placeholder="/absolute/path/to/warehouse" autocomplete="off">
+    <p id="warehouse-path-note" class="creds-note" style="display:none; margin-top:0.3rem;">
+      Points to the warehouse root in the bucket. Iceberg Explorer expects schemas and tables directly under this path: <code>s3://warehouse-path/&lt;schema&gt;/&lt;table&gt;/</code> containing <code>metadata/</code> and <code>data/</code> subdirectories.
+    </p>
     <div class="field-error" id="err-path"></div>
   </div>
 
@@ -232,8 +235,12 @@ export function getSettingsHtml(
   function applyType() {
     var isS3 = connType.value === 's3';
     // Update placeholder and label for warehouse path
-    warehousePath.placeholder = isS3 ? 's3://bucket/prefix' : '/absolute/path/to/warehouse';
-    if (pathLabel) pathLabel.textContent = isS3 ? 'S3 URI' : 'Warehouse path';
+    warehousePath.placeholder = isS3 ? 's3://bucket/warehouse-path' : '/absolute/path/to/warehouse';
+    if (pathLabel) pathLabel.textContent = isS3 ? 'Warehouse path (S3 URI)' : 'Warehouse path';
+    var pathNote = document.getElementById('warehouse-path-note');
+    if (pathNote) {
+      pathNote.style.display = isS3 ? 'block' : 'none';
+    }
     // Disable S3 inputs when not in S3 mode (FR-5)
     var inputs = s3Fields ? s3Fields.querySelectorAll('input, select') : [];
     inputs.forEach(function(el) {
@@ -313,10 +320,13 @@ export function getSettingsHtml(
       }
     }
     if (!path) {
-      showError('err-path', isS3 ? 'S3 URI is required.' : 'Warehouse path is required.');
+      showError('err-path', isS3 ? 'Warehouse path (S3 URI) is required.' : 'Warehouse path is required.');
       valid = false;
     } else if (!isS3 && !path.startsWith('/')) {
       showError('err-path', 'Warehouse path must be an absolute path (starting with /).');
+      valid = false;
+    } else if (isS3 && !/^s3[an]?:\/\/[^/]+/i.test(path)) {
+      showError('err-path', 'Warehouse path must be a valid S3 URI (e.g. s3://bucket/warehouse-path).');
       valid = false;
     }
 

@@ -376,6 +376,69 @@ void (async () => {
     assert.strictEqual(valid.valid, true, `expected valid: true, got ${JSON.stringify(valid)}`);
   });
 
+  await run('validateConnectionInput rejects S3 connection with empty warehousePath', async () => {
+    const res = validateConnectionInput(
+      {
+        id: 'test-conn',
+        label: 'AWS Empty Path',
+        connectionType: 's3',
+        warehousePath: '   ',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: Date.now(),
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+    );
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.ok(res.errors.some((e) => e.field === 'warehousePath'));
+    }
+  });
+
+  await run('validateConnectionInput rejects S3 connection with invalid S3 URI', async () => {
+    const res = validateConnectionInput(
+      {
+        id: 'test-conn',
+        label: 'AWS Invalid URI',
+        connectionType: 's3',
+        warehousePath: '/not/an/s3/path',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: Date.now(),
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+    );
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.ok(res.errors.some((e) => e.field === 'warehousePath'));
+    }
+  });
+
+  await run('validateConnectionInput accepts S3 connection with warehouse path prefix', async () => {
+    const res = validateConnectionInput(
+      {
+        id: 'test-conn',
+        label: 'AWS Warehouse Prefix',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/warehouse-path/subpath',
+        region: 'us-east-1',
+        sslVerification: true,
+        savedAt: Date.now(),
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+    );
+    assert.strictEqual(res.valid, true);
+  });
+
   // Helper for ConnectionManager testing
   function makeFakeContext(initialConfigs: ConnectionConfig[] = []) {
     const store = new Map<string, any>();

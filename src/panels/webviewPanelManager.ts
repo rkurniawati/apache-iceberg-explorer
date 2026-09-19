@@ -1819,7 +1819,7 @@ export class WebviewPanelManager {
       parentNamespace?: string,
       depth = 0,
     ): Promise<void> => {
-      if (depth > 6) return; // Prevent excessive recursion
+      if (depth > 3) return; // Prevent excessive recursion beyond predictable warehouse hierarchy
 
       const isTab = await adapter.isTable(handle, dirPath);
       if (isTab === true) {

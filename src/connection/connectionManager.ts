@@ -453,9 +453,9 @@ function buildS3Config(
  * Throws if the URI cannot be parsed.
  */
 function parseS3Uri(uri: string): { bucket: string; keyPrefix: string } {
-  const match = /^s3:\/\/([^/]+)\/?(.*)$/.exec(uri);
+  const match = /^s3[an]?:\/\/([^/]+)\/?(.*)$/.exec(uri.trim());
   if (!match) {
     throw new Error(`Invalid S3 URI: "${uri}"`);
   }
-  return { bucket: match[1]!, keyPrefix: match[2] ?? '' };
+  return { bucket: match[1]!, keyPrefix: (match[2] ?? '').replace(/\/+$/, '') };
 }

@@ -373,15 +373,15 @@ function normalisePrefix(prefix: string): string {
  */
 function s3UriToKey(uri: string): string {
   const normalised = uri.replace(/^s3[an]:\/\//, 's3://');
-  const withoutScheme = normalised.replace(/^s3:\/\/[^/]+\//, '');
-  return withoutScheme;
+  const match = /^s3:\/\/[^/]+(?:\/(.*))?$/.exec(normalised);
+  return match && match[1] !== undefined ? match[1] : '';
 }
 
 /**
  * Returns the key portion of an S3 URI as a prefix (with trailing slash stripped).
  */
 function s3UriToKeyPrefix(uri: string): string {
-  return s3UriToKey(uri).replace(/\/$/, '');
+  return s3UriToKey(uri).replace(/\/+$/, '');
 }
 
 /**
