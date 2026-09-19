@@ -68,6 +68,7 @@ export class IcebergTreeProvider
    * A cache hit means the async fetch has completed; the loading item is never stored here.
    */
   private readonly cache = new Map<string, IcebergTreeItem[]>();
+  private readonly pendingFetches = new Map<string, Promise<IcebergTreeItem[]>>();
 
   // ── Constructor ────────────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ export class IcebergTreeProvider
       this.storageAdapter = adapter;
     }
     this.cache.clear();
+    this.pendingFetches.clear();
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -129,6 +131,7 @@ export class IcebergTreeProvider
    */
   clearCache(parentPath: string): void {
     this.cache.delete(parentPath);
+    this.pendingFetches.delete(parentPath);
     this._onDidChangeTreeData.fire(undefined);
   }
 
@@ -140,13 +143,36 @@ export class IcebergTreeProvider
 
   /**
    * Required for TreeView.reveal() — returns the parent of a tree item by
-   * looking it up in the cache via the item's parentPath.
+   * checking connection configs and looking up in the cache via the item's parentPath.
    */
   getParent(element: IcebergTreeItem): IcebergTreeItem | undefined {
     if (!element.parentPath) { return undefined; }
+
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '');
+
+    // If the parent is the active connection
+    if (
+      this.activeConnectionId &&
+      (element.parentPath === this.activeConnectionId || element.parentPath === ROOT_PATH)
+    ) {
+      const activeCfg = this.configs.find((c) => c.id === this.activeConnectionId);
+      if (activeCfg) {
+        return makeConnectionItem(activeCfg, true);
+      }
+    }
+
+    // Check if parent matches any connection config (by ID or warehousePath)
+    const connCfg = this.configs.find(
+      (c) => c.id === element.parentPath || norm(c.warehousePath) === norm(element.parentPath!)
+    );
+    if (connCfg) {
+      return makeConnectionItem(connCfg, connCfg.id === this.activeConnectionId);
+    }
+
+    const normParent = norm(element.parentPath);
     for (const children of this.cache.values()) {
       for (const child of children) {
-        if (child.resourcePath === element.parentPath) {
+        if (child.resourcePath === element.parentPath || norm(child.resourcePath) === normParent) {
           return child;
         }
       }
@@ -155,12 +181,24 @@ export class IcebergTreeProvider
   }
 
   /**
-   * Find a cached tree item by its exact resourcePath, or undefined if not yet loaded.
+   * Find a tree item by its exact resourcePath or connection ID/warehousePath,
+   * or undefined if not yet loaded.
    */
   findItemByPath(resourcePath: string): IcebergTreeItem | undefined {
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '');
+    const normTarget = norm(resourcePath);
+
+    // Check saved connections first
+    const conn = this.configs.find(
+      (c) => c.id === resourcePath || norm(c.warehousePath) === normTarget
+    );
+    if (conn) {
+      return makeConnectionItem(conn, conn.id === this.activeConnectionId);
+    }
+
     for (const children of this.cache.values()) {
       for (const child of children) {
-        if (child.resourcePath === resourcePath) {
+        if (child.resourcePath === resourcePath || norm(child.resourcePath) === normTarget) {
           return child;
         }
       }
@@ -243,9 +281,27 @@ export class IcebergTreeProvider
    * connection node expansion).
    */
   private fetchSchemas(cacheKey: string): void {
-    const handle = this.handle!;
+    void this.fetchSchemasAsync(cacheKey);
+  }
 
-    void (async () => {
+  /**
+   * Async version of fetchSchemas that returns the loaded children and reuses in-flight fetches.
+   */
+  async fetchSchemasAsync(cacheKey: string): Promise<IcebergTreeItem[]> {
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey)!;
+    }
+    const pending = this.pendingFetches.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    const handle = this.handle;
+    if (!handle) {
+      return [];
+    }
+
+    const promise = (async () => {
       try {
         this.logger.info(
           `Lazy-loading children for node type=schema path=${cacheKey}`,
@@ -258,28 +314,36 @@ export class IcebergTreeProvider
           );
           children = [makeErrorItem(cacheKey, 'schema', result.message)];
         } else {
+          const parentPath = this.activeConnectionId ?? ROOT_PATH;
           children = await Promise.all(
             result.map(async (schemaPath) => {
               const tableCheck = await this.storageAdapter.isTable(handle, schemaPath);
               const isT = !isStorageError(tableCheck) && tableCheck;
               const label = lastSegment(schemaPath);
               return isT
-                ? makeTableItem(schemaPath, label, cacheKey)
-                : makeSchemaItem(schemaPath, label);
+                ? makeTableItem(schemaPath, label, parentPath)
+                : makeSchemaItem(schemaPath, label, parentPath);
             }),
           );
         }
         this.cache.set(cacheKey, children);
+        return children;
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred.';
         this.logger.warn(
           `Child load failed for schema: internal — showing retry node`,
         );
-        this.cache.set(cacheKey, [makeErrorItem(cacheKey, 'schema', errorMsg)]);
+        const children = [makeErrorItem(cacheKey, 'schema', errorMsg)];
+        this.cache.set(cacheKey, children);
+        return children;
       } finally {
+        this.pendingFetches.delete(cacheKey);
         this._onDidChangeTreeData.fire(undefined);
       }
     })();
+
+    this.pendingFetches.set(cacheKey, promise);
+    return promise;
   }
 
   /**
@@ -291,9 +355,31 @@ export class IcebergTreeProvider
     cacheKey: string,
     parentNodeType: TreeNodeType,
   ): void {
-    const handle = this.handle!;
+    void this.fetchChildrenAsync(element, cacheKey, parentNodeType);
+  }
 
-    void (async () => {
+  /**
+   * Async version of fetchChildren that returns the loaded children and reuses in-flight fetches.
+   */
+  async fetchChildrenAsync(
+    element: IcebergTreeItem,
+    cacheKey: string,
+    parentNodeType: TreeNodeType,
+  ): Promise<IcebergTreeItem[]> {
+    if (this.cache.has(cacheKey)) {
+      return this.cache.get(cacheKey)!;
+    }
+    const pending = this.pendingFetches.get(cacheKey);
+    if (pending) {
+      return pending;
+    }
+
+    const handle = this.handle;
+    if (!handle) {
+      return [];
+    }
+
+    const promise = (async () => {
       try {
         let children: IcebergTreeItem[];
 
@@ -316,7 +402,7 @@ export class IcebergTreeProvider
                 const label = lastSegment(tablePath);
                 return isT
                   ? makeTableItem(tablePath, label, element.resourcePath)
-                  : makeSchemaItem(tablePath, label);
+                  : makeSchemaItem(tablePath, label, element.resourcePath);
               }),
             );
           }
@@ -362,12 +448,11 @@ export class IcebergTreeProvider
                   const isT = !isStorageError(tableCheck) && tableCheck;
                   return isT
                     ? makeTableItem(subPath, subDir, element.resourcePath)
-                    : makeSchemaItem(subPath, subDir);
+                    : makeSchemaItem(subPath, subDir, element.resourcePath);
                 }),
               );
             }
           }
-
 
         } else if (element.nodeType === 'metadataFolder') {
           // ── Metadata folder → metadata versions ──────────────────────────────
@@ -424,17 +509,113 @@ export class IcebergTreeProvider
         }
 
         this.cache.set(cacheKey, children);
+        return children;
       } catch (err: unknown) {
         const errorMsg = err instanceof Error ? err.message : 'An unexpected error occurred.';
         this.logger.warn(
           `Child load failed for ${parentNodeType}: internal \u2014 showing retry node`,
         );
-        this.cache.set(cacheKey, [makeErrorItem(cacheKey, parentNodeType, errorMsg)]);
+        const children = [makeErrorItem(cacheKey, parentNodeType, errorMsg)];
+        this.cache.set(cacheKey, children);
+        return children;
       } finally {
+        this.pendingFetches.delete(cacheKey);
         // Fire refresh — VS Code will call getChildren again and get the cached result
         this._onDidChangeTreeData.fire(undefined);
       }
     })();
+
+    this.pendingFetches.set(cacheKey, promise);
+    return promise;
+  }
+
+  /**
+   * Lazily loads tree nodes along the path to the target resource and returns
+   * the corresponding IcebergTreeItem once loaded.
+   */
+  async resolveItemByPath(resourcePath: string): Promise<IcebergTreeItem | undefined> {
+    const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '');
+    const targetNorm = norm(resourcePath);
+
+    // 1. Fast path: check if already in cache or matches a connection
+    const existing = this.findItemByPath(resourcePath);
+    if (existing) {
+      return existing;
+    }
+
+    // 2. Identify the active or matching connection
+    let activeCfg = this.configs.find((c) => c.id === this.activeConnectionId);
+    let warehouseNorm = activeCfg ? norm(activeCfg.warehousePath) : '';
+
+    if (!activeCfg || (targetNorm !== warehouseNorm && !targetNorm.startsWith(warehouseNorm + '/'))) {
+      const matchingConn = this.configs.find((c) => {
+        const wNorm = norm(c.warehousePath);
+        return targetNorm === wNorm || targetNorm.startsWith(wNorm + '/');
+      });
+      if (matchingConn) {
+        if (matchingConn.id !== this.activeConnectionId) {
+          const activated = await this._activateConnection(matchingConn.id);
+          if (!(activated instanceof Error)) {
+            this.setActiveConnectionId(matchingConn.id);
+            this.setActiveConnection(activated.handle, activated.adapter);
+            activeCfg = matchingConn;
+            warehouseNorm = norm(activeCfg.warehousePath);
+          } else {
+            return undefined;
+          }
+        } else {
+          activeCfg = matchingConn;
+          warehouseNorm = norm(activeCfg.warehousePath);
+        }
+      }
+    }
+
+    if (!activeCfg || !this.handle) {
+      return undefined;
+    }
+
+    if (targetNorm === warehouseNorm) {
+      return makeConnectionItem(activeCfg, true);
+    }
+
+    if (!targetNorm.startsWith(warehouseNorm + '/')) {
+      return undefined;
+    }
+
+    const relPath = targetNorm.slice(warehouseNorm.length + 1);
+    const segments = relPath.split('/').filter(Boolean);
+    if (segments.length === 0) {
+      return undefined;
+    }
+
+    let currentChildren = await this.fetchSchemasAsync(ROOT_PATH);
+    let currentItem: IcebergTreeItem | undefined;
+    let accumulatedPath = warehouseNorm;
+
+    for (let i = 0; i < segments.length; i++) {
+      const seg = segments[i];
+      accumulatedPath = `${accumulatedPath}/${seg}`;
+
+      currentItem = currentChildren.find(
+        (c) => norm(c.resourcePath) === accumulatedPath || lastSegment(c.resourcePath) === seg,
+      );
+
+      if (!currentItem) {
+        return undefined;
+      }
+
+      if (i === segments.length - 1) {
+        return currentItem;
+      }
+
+      currentChildren = await this.fetchChildrenAsync(
+        currentItem,
+        currentItem.resourcePath,
+        currentItem.nodeType,
+      );
+    }
+
+    return currentItem;
   }
 }
 

@@ -767,6 +767,161 @@ void (async () => {
     assert.strictEqual(children[0].nodeType, 'table');
   });
 
+  // ── Test 23: findItemByPath resolves connection by id or warehousePath ────
+  await run('findItemByPath resolves connection item by config id or warehousePath', async () => {
+    const provider = makeProvider();
+    provider.setConnections([conn1, conn2]);
+    provider.setActiveConnectionId('conn-1');
+
+    const byId = provider.findItemByPath('conn-1');
+    assert.ok(byId, 'expected connection item by id');
+    assert.strictEqual(byId.resourcePath, 'conn-1');
+    assert.strictEqual(byId.nodeType, 'connection');
+
+    const byWarehouse = provider.findItemByPath('s3://bucket/prefix');
+    assert.ok(byWarehouse, 'expected connection item by warehousePath');
+    assert.strictEqual(byWarehouse.resourcePath, 'conn-2');
+  });
+
+  // ── Test 24: getParent resolves connection and nested parents ──────────────
+  await run('getParent resolves active connection for root schema and parent for nested schema', async () => {
+    const { makeSchemaItem } = await import('../tree/types.js');
+    const provider = makeProvider();
+    provider.setConnections([conn1]);
+    provider.setActiveConnectionId('conn-1');
+
+    // Root schema with parentPath === 'conn-1'
+    const rootSchema = makeSchemaItem('/warehouse/dogs', 'dogs', 'conn-1');
+    const rootParent = provider.getParent(rootSchema);
+    assert.ok(rootParent, 'expected parent connection item');
+    assert.strictEqual(rootParent.resourcePath, 'conn-1');
+    assert.strictEqual(rootParent.nodeType, 'connection');
+
+    // Add rootSchema to cache under '__root__'
+    (provider as any).cache.set('__root__', [rootSchema]);
+
+    // Nested schema under dogs
+    const nestedSchema = makeSchemaItem('/warehouse/dogs/testdogs.db', 'testdogs.db', '/warehouse/dogs');
+    const nestedParent = provider.getParent(nestedSchema);
+    assert.ok(nestedParent, 'expected parent schema item');
+    assert.strictEqual(nestedParent.resourcePath, '/warehouse/dogs');
+  });
+
+  // ── Test 25: resolveItemByPath drills down uncached path ───────────────────
+  await run('resolveItemByPath drills down uncached path (dogs -> testdogs.db) and populates cache', async () => {
+    const adapter = makeAdapter({
+      async listSchemas() {
+        return ['s3://rk-iceberg/dogs'];
+      },
+      async listTables(_handle, schemaPath) {
+        if (schemaPath === 's3://rk-iceberg/dogs') {
+          return ['s3://rk-iceberg/dogs/testdogs.db'];
+        }
+        return [];
+      },
+      async isTable() {
+        return false;
+      },
+    });
+
+    const s3Conn: ConnectionConfig = {
+      id: 'conn-s3',
+      label: 'S3 Connection',
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      sslVerification: true,
+      savedAt: 1000,
+    };
+    const s3Handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      s3Config: {
+        client: {} as any,
+        bucket: 'rk-iceberg',
+        keyPrefix: '',
+      },
+    };
+
+    const provider = makeProvider(adapter);
+    provider.setConnections([s3Conn]);
+    provider.setActiveConnectionId('conn-s3');
+    provider.setActiveConnection(s3Handle, adapter);
+
+    // Tree cache is initially empty
+    assert.strictEqual(provider.findItemByPath('s3://rk-iceberg/dogs/testdogs.db'), undefined);
+
+    // Resolving uncached nested path
+    const resolved = await provider.resolveItemByPath('s3://rk-iceberg/dogs/testdogs.db');
+    assert.ok(resolved, 'expected resolved item for testdogs.db');
+    assert.strictEqual(resolved.resourcePath, 's3://rk-iceberg/dogs/testdogs.db');
+    assert.strictEqual(resolved.label, 'testdogs.db');
+    assert.strictEqual(resolved.parentPath, 's3://rk-iceberg/dogs');
+
+    // Verify ancestors are now cached and getParent works up to root
+    const parent = provider.getParent(resolved);
+    assert.ok(parent, 'expected parent of testdogs.db');
+    assert.strictEqual(parent.resourcePath, 's3://rk-iceberg/dogs');
+
+    const grandParent = provider.getParent(parent);
+    assert.ok(grandParent, 'expected connection grandparent');
+    assert.strictEqual(grandParent.resourcePath, 'conn-s3');
+  });
+
+  // ── Test 26: resolveItemByPath resolves connection root and table ───────────
+  await run('resolveItemByPath resolves connection root and deep table item', async () => {
+    const adapter = makeAdapter({
+      async listSchemas() {
+        return ['s3://rk-iceberg/dogs'];
+      },
+      async listTables(_handle, schemaPath) {
+        if (schemaPath === 's3://rk-iceberg/dogs') {
+          return ['s3://rk-iceberg/dogs/testdogs.db'];
+        }
+        if (schemaPath === 's3://rk-iceberg/dogs/testdogs.db') {
+          return ['s3://rk-iceberg/dogs/testdogs.db/dogtable1'];
+        }
+        return [];
+      },
+      async isTable(_handle, path) {
+        return path === 's3://rk-iceberg/dogs/testdogs.db/dogtable1';
+      },
+    });
+
+    const s3Conn: ConnectionConfig = {
+      id: 'conn-s3',
+      label: 'S3 Connection',
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      sslVerification: true,
+      savedAt: 1000,
+    };
+    const s3Handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      s3Config: {
+        client: {} as any,
+        bucket: 'rk-iceberg',
+        keyPrefix: '',
+      },
+    };
+
+    const provider = makeProvider(adapter);
+    provider.setConnections([s3Conn]);
+    provider.setActiveConnectionId('conn-s3');
+    provider.setActiveConnection(s3Handle, adapter);
+
+    // 1. Resolve root breadcrumb
+    const rootResolved = await provider.resolveItemByPath('s3://rk-iceberg');
+    assert.ok(rootResolved, 'expected resolved root connection');
+    assert.strictEqual(rootResolved.resourcePath, 'conn-s3');
+
+    // 2. Resolve deep table item
+    const tableResolved = await provider.resolveItemByPath('s3://rk-iceberg/dogs/testdogs.db/dogtable1');
+    assert.ok(tableResolved, 'expected resolved table item');
+    assert.strictEqual(tableResolved.resourcePath, 's3://rk-iceberg/dogs/testdogs.db/dogtable1');
+    assert.strictEqual(tableResolved.nodeType, 'table');
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

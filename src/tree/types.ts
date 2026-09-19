@@ -57,6 +57,7 @@ export class IcebergTreeItem extends vscode.TreeItem {
     public readonly handle?: ActiveConnectionHandle,
   ) {
     super(label, collapsibleStateFor(nodeType));
+    this.id = resourcePath;
   }
 }
 
@@ -65,11 +66,12 @@ export class IcebergTreeItem extends vscode.TreeItem {
 // ---------------------------------------------------------------------------
 
 /** Creates a schema node. */
-export function makeSchemaItem(schemaPath: string, label: string): IcebergTreeItem {
+export function makeSchemaItem(schemaPath: string, label: string, parentPath?: string): IcebergTreeItem {
   const item = new IcebergTreeItem(
     label,
     'schema',
     schemaPath,
+    parentPath,
   );
   item.iconPath = new vscode.ThemeIcon('database');
   return item;

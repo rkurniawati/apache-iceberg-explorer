@@ -184,7 +184,7 @@ export class WebviewPanelManager {
     private readonly logger: ILogger,
     private readonly queryEngine?: QueryEngine,
     /** Optional callback to reveal a resource path in the tree view. */
-    private readonly revealPath?: (resourcePath: string) => void,
+    private readonly revealPath?: (resourcePath: string) => void | Promise<void>,
   ) {}
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -1326,7 +1326,7 @@ export class WebviewPanelManager {
       : '/' + targetParts.join('/');
 
     this.logger.info(`Breadcrumb navigate → resolved path: ${targetPath}`);
-    this.revealPath(targetPath);
+    void this.revealPath(targetPath);
   }
 
   /**

@@ -82,13 +82,21 @@ export function activate(context: vscode.ExtensionContext): void {
     localFsAdapter,
     logger,
     queryEngine,
-    (resourcePath: string) => {
-      const item = treeProvider.findItemByPath(resourcePath);
-      if (item) {
-        void treeView.reveal(item, { select: true, focus: false, expand: true });
-        logger.info(`Tree reveal: ${resourcePath}`);
-      } else {
-        logger.warn(`Tree reveal skipped — item not cached: ${resourcePath}`);
+    async (resourcePath: string) => {
+      try {
+        let item = treeProvider.findItemByPath(resourcePath);
+        if (!item) {
+          item = await treeProvider.resolveItemByPath(resourcePath);
+        }
+        if (item) {
+          await treeView.reveal(item, { select: true, focus: false, expand: true });
+          logger.info(`Tree reveal: ${resourcePath}`);
+        } else {
+          logger.warn(`Tree reveal skipped — item not cached: ${resourcePath}`);
+        }
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logger.warn(`Tree reveal failed: ${msg}`);
       }
     },
   );
