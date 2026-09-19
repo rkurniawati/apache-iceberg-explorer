@@ -557,6 +557,145 @@ void (async () => {
     });
   });
 
+  // 17. ConnectionManager.saveConnection preserves existing credentials and skips redundant write when editing with masked credentials
+  await run('ConnectionManager.saveConnection preserves existing credentials when editing with masked credentials', async () => {
+    const ctx = makeFakeContext();
+    const cm = new ConnectionManager(ctx, testLogger);
+    const saveId = await cm.saveConnection(
+      {
+        id: 'conn-1',
+        label: 'AWS Initial',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/prefix',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: 'ORIGINAL_AK', secretKey: 'ORIGINAL_SK' },
+    );
+    assert.strictEqual(saveId, 'conn-1');
+
+    // Spy on secrets.store to ensure redundant writes are skipped
+    let storeCallCount = 0;
+    const origStore = ctx.secrets.store;
+    ctx.secrets.store = async (k: string, v: string) => {
+      storeCallCount++;
+      return origStore(k, v);
+    };
+
+    // Edit connection and provide masked credentials
+    const editResult = await cm.saveConnection(
+      {
+        id: 'conn-1',
+        label: 'AWS Updated Label',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/prefix-2',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: '••••••••', secretKey: '••••••••' },
+    );
+    assert.strictEqual(editResult, 'conn-1');
+    assert.strictEqual(storeCallCount, 0, 'Expected secrets.store to be skipped when credentials did not change');
+
+    // Verify stored credentials in SecretStorage
+    const storedRaw = await ctx.secrets.get('icebergExplorer.credentials.conn-1');
+    assert.ok(storedRaw, 'Expected credentials to exist in SecretStorage');
+    const stored = JSON.parse(storedRaw);
+    assert.strictEqual(stored.ak, 'ORIGINAL_AK');
+    assert.strictEqual(stored.sk, 'ORIGINAL_SK');
+
+    // Also check hasCredential returns true
+    const hasCred = await cm.hasCredential('conn-1');
+    assert.strictEqual(hasCred, true);
+  });
+
+  // 18. ConnectionManager.saveConnection updates only the modified credential when the other is masked
+  await run('ConnectionManager.saveConnection updates only the modified credential when the other is masked', async () => {
+    const ctx = makeFakeContext();
+    const cm = new ConnectionManager(ctx, testLogger);
+    await cm.saveConnection(
+      {
+        id: 'conn-1',
+        label: 'AWS Initial',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/prefix',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: 'ORIGINAL_AK', secretKey: 'ORIGINAL_SK' },
+    );
+
+    // Provide masked accessKey, new secretKey
+    const editResult = await cm.saveConnection(
+      {
+        id: 'conn-1',
+        label: 'AWS Initial',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/prefix',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: '••••••••', secretKey: 'NEW_SECRET_KEY' },
+    );
+    assert.strictEqual(editResult, 'conn-1');
+
+    const storedRaw = await ctx.secrets.get('icebergExplorer.credentials.conn-1');
+    const stored = JSON.parse(storedRaw);
+    assert.strictEqual(stored.ak, 'ORIGINAL_AK');
+    assert.strictEqual(stored.sk, 'NEW_SECRET_KEY');
+  });
+
+  // 19. ConnectionManager.saveConnection rejects masked credentials when saving a new connection without existing credentials
+  await run('ConnectionManager.saveConnection rejects masked credentials when saving a new connection without existing credentials', async () => {
+    const ctx = makeFakeContext();
+    const cm = new ConnectionManager(ctx, testLogger);
+    const result = await cm.saveConnection(
+      {
+        label: 'AWS New',
+        connectionType: 's3',
+        warehousePath: 's3://my-bucket/prefix',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: '••••••••', secretKey: '••••••••' },
+    );
+    assert.ok(result instanceof Error, 'Expected saveConnection to fail for new connection with masked credentials');
+    assert.ok(result.message.includes('Access key is required'));
+  });
+
+  // 20. WebviewPanelManager.openSettingsPanel sends editConnection with hasSavedCredentials and sslVerification
+  await run('WebviewPanelManager.openSettingsPanel sends editConnection with hasSavedCredentials and sslVerification', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      const editConfig: ConnectionConfig = {
+        id: 'conn-s3-1',
+        label: 'My S3',
+        connectionType: 's3',
+        warehousePath: 's3://bucket/path',
+        endpointUrl: 'https://minio.local:9000',
+        region: 'us-east-1',
+        sslVerification: false,
+        savedAt: 12345,
+      };
+
+      await mgr.openSettingsPanel(
+        editConfig,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        undefined,
+        async (id) => id === 'conn-s3-1',
+      );
+
+      const msgs = getMessages();
+      const editMsg = msgs.find((m) => m.type === 'editConnection');
+      assert.ok(editMsg, `expected editConnection in messages: ${JSON.stringify(msgs)}`);
+      assert.strictEqual(editMsg!.hasSavedCredentials, true);
+      assert.strictEqual((editMsg!.config as any).sslVerification, false);
+      assert.strictEqual((editMsg!.config as any).label, 'My S3');
+    });
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

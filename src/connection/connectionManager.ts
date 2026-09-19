@@ -42,6 +42,19 @@ interface StoredCredential {
   sk: string;  // secretKey
 }
 
+/**
+ * Checks whether a credential value is a masked placeholder (e.g. asterisks or bullets)
+ * or empty.
+ */
+export function isMaskedCredential(val?: string): boolean {
+  if (!val) return true;
+  const trimmed = val.trim();
+  if (trimmed === '' || trimmed === '••••••••' || trimmed === '********') {
+    return true;
+  }
+  return /^[\u2022*]+$/.test(trimmed);
+}
+
 // ---------------------------------------------------------------------------
 // ConnectionManager
 // ---------------------------------------------------------------------------
@@ -59,18 +72,27 @@ export class ConnectionManager {
     this._logger.info('ConnectionManager initialised');
   }
 
+  /**
+   * Checks whether credentials exist in SecretStorage for the given connection ID.
+   */
+  async hasCredential(id: string): Promise<boolean> {
+    const cred = await this._loadCredential(id);
+    return cred !== undefined;
+  }
+
   // -------------------------------------------------------------------------
-  // T-07 + T-08 + T-09: Save a connection (persist config + credentials + LRU)
+  // T-08 / T-09: Save (create or update) a connection configuration
   // -------------------------------------------------------------------------
 
   /**
-   * Saves a connection configuration and credentials.
-   *
-   * - Validates inputs (T-12/CM-V1–V5).
-   * - Assigns a stable `id` (UUID) if the config is new.
-   * - Persists non-secret fields to globalState.
-   * - Persists S3 credentials to SecretStorage under the config's id.
-   * - Enforces the 5-config LRU cap, evicting the oldest on overflow (FR-6b).
+   * Validates and persists a connection configuration.
+   * - Validates all fields against CM-V1 through CM-V5 and unique connection names.
+   * - For S3 connections, credentials are saved to SecretStorage under
+   *   `icebergExplorer.credentials.<id>` (T-08). If editing an existing connection
+   *   and masked or empty credentials are provided, existing stored credentials
+   *   are preserved.
+   * - Non-secret config is appended to globalState array under `icebergExplorer.connections`.
+   * - Enforces LRU cap of 5 connections (T-09).
    *
    * @param config    - Non-credential connection fields. `id` may be omitted for new connections;
    *                    if present the existing entry is updated.
@@ -79,7 +101,7 @@ export class ConnectionManager {
    */
   async saveConnection(
     config: Omit<ConnectionConfig, 'id' | 'savedAt'> & { id?: string },
-    credentials: { accessKey: string; secretKey: string },
+    credentials: { accessKey?: string; secretKey?: string },
   ): Promise<string | Error> {
     const fullConfig: ConnectionConfig = {
       ...config,
@@ -90,20 +112,42 @@ export class ConnectionManager {
 
     const configs = this._readConfigs();
 
+    let effectiveAccessKey = credentials.accessKey ? credentials.accessKey.trim() : '';
+    let effectiveSecretKey = credentials.secretKey ? credentials.secretKey.trim() : '';
+
+    if (fullConfig.connectionType === 's3') {
+      const existingCred = fullConfig.id ? await this._loadCredential(fullConfig.id) : undefined;
+      if (isMaskedCredential(effectiveAccessKey)) {
+        effectiveAccessKey = existingCred?.ak ?? '';
+      }
+      if (isMaskedCredential(effectiveSecretKey)) {
+        effectiveSecretKey = existingCred?.sk ?? '';
+      }
+    }
+
+    const effectiveCreds = {
+      accessKey: effectiveAccessKey,
+      secretKey: effectiveSecretKey,
+    };
+
     // CM-V1 through CM-V5 and unique connection name validation
-    const validation = validateConnectionInput(fullConfig, credentials, configs);
+    const validation = validateConnectionInput(fullConfig, effectiveCreds, configs);
     if (!validation.valid) {
       const msg = validation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
       this._logger.warn(`ConnectionManager.saveConnection: validation failed — ${msg}`);
       return new Error(`Validation failed: ${msg}`);
     }
 
+    const credsChanged = !isMaskedCredential(credentials.accessKey) || !isMaskedCredential(credentials.secretKey);
+
     // Persist credentials to SecretStorage BEFORE updating globalState so that
     // if the SecretStorage write fails we don't leave a dangling config entry (T-08).
-    if (fullConfig.connectionType === 's3') {
+    // Only write to SecretStorage if credentials were provided or changed, avoiding
+    // redundant OS Keychain/SecretStorage writes when editing other connection settings.
+    if (fullConfig.connectionType === 's3' && credsChanged) {
       const stored: StoredCredential = {
-        ak: credentials.accessKey.trim(),
-        sk: credentials.secretKey.trim(),
+        ak: effectiveCreds.accessKey.trim(),
+        sk: effectiveCreds.secretKey.trim(),
       };
       await this._secrets.store(
         `${SECRET_KEY_PREFIX}${fullConfig.id}`,

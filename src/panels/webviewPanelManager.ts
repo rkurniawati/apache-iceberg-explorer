@@ -984,6 +984,7 @@ export class WebviewPanelManager {
     activateConnection: (id: string) => Promise<ActiveConnectionHandle | StorageError>,
     deleteConnection:   (id: string) => Promise<void>,
     getExistingConfigs?: () => ConnectionConfig[],
+    hasCredential?:     (id: string) => Promise<boolean>,
   ): Promise<void> {
     const key = panelRegistryKey(PanelType.Settings, 'settings');
     const existing = this.registry.get(key);
@@ -1000,9 +1001,19 @@ export class WebviewPanelManager {
       }
       // If an editConfig was provided, post the editConnection message to pre-fill
       if (editConfig) {
+        const hasSavedCredentials = (editConfig.connectionType === 's3') && (hasCredential ? await hasCredential(editConfig.id) : true);
         void existing.panel.webview.postMessage({
           type: 'editConnection',
-          config: { id: editConfig.id, label: editConfig.label, connectionType: editConfig.connectionType, warehousePath: editConfig.warehousePath, endpointUrl: editConfig.endpointUrl, region: editConfig.region },
+          config: {
+            id: editConfig.id,
+            label: editConfig.label,
+            connectionType: editConfig.connectionType,
+            warehousePath: editConfig.warehousePath,
+            endpointUrl: editConfig.endpointUrl,
+            region: editConfig.region,
+            sslVerification: editConfig.sslVerification,
+          },
+          hasSavedCredentials,
         });
       }
       return;
@@ -1106,9 +1117,19 @@ export class WebviewPanelManager {
 
     // If an editConfig was provided, post the editConnection message to pre-fill the form.
     if (editConfig) {
+      const hasSavedCredentials = (editConfig.connectionType === 's3') && (hasCredential ? await hasCredential(editConfig.id) : true);
       void panel.webview.postMessage({
         type: 'editConnection',
-        config: { id: editConfig.id, label: editConfig.label, connectionType: editConfig.connectionType, warehousePath: editConfig.warehousePath, endpointUrl: editConfig.endpointUrl, region: editConfig.region },
+        config: {
+          id: editConfig.id,
+          label: editConfig.label,
+          connectionType: editConfig.connectionType,
+          warehousePath: editConfig.warehousePath,
+          endpointUrl: editConfig.endpointUrl,
+          region: editConfig.region,
+          sslVerification: editConfig.sslVerification,
+        },
+        hasSavedCredentials,
       });
     }
 

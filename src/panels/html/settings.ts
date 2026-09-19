@@ -175,7 +175,7 @@ export function getSettingsHtml(
       <div class="field-error" id="err-region"></div>
     </div>
     <p id="creds-note" class="creds-note" style="display:none;">
-      Re-enter your access key and secret key to update credentials.
+      Existing credentials are saved. Enter new values only to update credentials.
     </p>
     <div class="field">
       <label for="access-key">Access key</label>
@@ -239,6 +239,9 @@ export function getSettingsHtml(
     inputs.forEach(function(el) {
       el.disabled = !isS3;
     });
+    if (credsNote && !isS3) {
+      credsNote.style.display = 'none';
+    }
   }
 
   connType.addEventListener('change', applyType);
@@ -255,7 +258,10 @@ export function getSettingsHtml(
     secretKey.value    = '';
     sslVerify.checked  = true;
     if (formHeading) formHeading.textContent = 'New Connection';
-    if (credsNote)   credsNote.style.display = 'none';
+    if (credsNote) {
+      credsNote.textContent = '';
+      credsNote.style.display = 'none';
+    }
     clearErrors();
     hideBanner();
   });
@@ -364,9 +370,32 @@ export function getSettingsHtml(
     secretKey.value = '';
   });
 
-  // Clear connection label error when the user types
+  const MASK_VALUE = '••••••••';
+  function handleMaskFocus(el) {
+    if (el.value === MASK_VALUE || el.value === '********') {
+      el.select();
+    }
+  }
+  accessKey.addEventListener('focus', function () { handleMaskFocus(accessKey); });
+  secretKey.addEventListener('focus', function () { handleMaskFocus(secretKey); });
+
+  // Clear field errors when the user types
   connLabel.addEventListener('input', function () {
     var el = document.getElementById('err-label');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+  accessKey.addEventListener('input', function () {
+    var el = document.getElementById('err-access-key');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+  secretKey.addEventListener('input', function () {
+    var el = document.getElementById('err-secret-key');
     if (el) {
       el.textContent = '';
       el.classList.remove('visible');
@@ -391,11 +420,20 @@ export function getSettingsHtml(
         }
         // Reset form to "New Connection" state after a successful save
         connId.value = '';
+        accessKey.value = '';
+        secretKey.value = '';
         if (formHeading) formHeading.textContent = 'New Connection';
-        if (credsNote)   credsNote.style.display = 'none';
+        if (credsNote) {
+          credsNote.textContent = '';
+          credsNote.style.display = 'none';
+        }
         break;
       case 'saveError':
         showBanner(msg.message || 'Failed to save connection.', true);
+        if (connId.value && connType.value === 's3' && !accessKey.value && !secretKey.value) {
+          accessKey.value = MASK_VALUE;
+          secretKey.value = MASK_VALUE;
+        }
         if (msg.message && (msg.message.includes('label:') || msg.message.toLowerCase().includes('already exists'))) {
           var labelMsg = msg.message;
           if (labelMsg.includes('label:')) {
@@ -422,16 +460,31 @@ export function getSettingsHtml(
         showBanner(msg.message || 'Could not delete connection.', true);
         break;
       case 'editConnection':
-        // Pre-fill form fields from msg.config (non-credential fields only)
+        // Pre-fill form fields from msg.config
         connType.value         = msg.config.connectionType;
         connLabel.value        = msg.config.label;
         warehousePath.value    = msg.config.warehousePath;
         endpointUrl.value      = msg.config.endpointUrl || '';
         region.value           = msg.config.region || '';
         connId.value           = msg.config.id;
+        if (sslVerify && msg.config.sslVerification !== undefined) {
+          sslVerify.checked    = msg.config.sslVerification !== false;
+        }
         if (formHeading) formHeading.textContent = 'Edit Connection';
-        if (credsNote && msg.config.connectionType === 's3') {
-          credsNote.style.display = 'block';
+        if (msg.config.connectionType === 's3' && msg.hasSavedCredentials) {
+          accessKey.value = MASK_VALUE;
+          secretKey.value = MASK_VALUE;
+          if (credsNote) {
+            credsNote.textContent = 'Existing credentials are saved. Enter new values only to update credentials.';
+            credsNote.style.display = 'block';
+          }
+        } else {
+          accessKey.value = '';
+          secretKey.value = '';
+          if (credsNote) {
+            credsNote.textContent = '';
+            credsNote.style.display = 'none';
+          }
         }
         applyType();
         break;

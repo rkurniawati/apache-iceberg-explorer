@@ -130,6 +130,7 @@ export function activate(context: vscode.ExtensionContext): void {
           return p;
         },
         () => connectionManager.listConnections(),
+        (id) => connectionManager.hasCredential(id),
       );
     }),
   );
