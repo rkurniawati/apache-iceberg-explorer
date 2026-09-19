@@ -11,6 +11,7 @@
     "Other"
   ],
   "activationEvents": [
+    "onView:icebergExplorer",
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
