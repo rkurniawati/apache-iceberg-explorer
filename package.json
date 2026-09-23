@@ -86,7 +86,14 @@
           "group": "icebergConnection@2"
         }
       ]
-    }
+    },
+    "viewsWelcome": [
+      {
+        "view": "icebergExplorer",
+        "contents": "Loading Iceberg Explorer...",
+        "when": "!icebergExplorer.initialized"
+      }
+    ]
   },
   "scripts": {
     "compile": "tsc -p ./",

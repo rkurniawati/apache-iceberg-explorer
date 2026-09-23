@@ -44,11 +44,6 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const localFsAdapter = new LocalFsAdapter(logger);
   const s3Adapter = new S3Adapter(logger);
-  const queryEngine = new QueryEngine(logger, context.extensionUri);
-  // Warm up WASM in background so the first Parquet query has no cold-start delay.
-  queryEngine.warmUp();
-  // Ensure the worker thread is terminated when the extension is deactivated.
-  context.subscriptions.push({ dispose: () => queryEngine.dispose() });
 
   // Callback injected into tree provider and commands to activate a connection by id.
   const activateConnectionCallback = async (id: string) => {
@@ -71,11 +66,22 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // createTreeView (instead of registerTreeDataProvider) gives us a TreeView handle
   // with a .reveal() method, required for breadcrumb navigation (FR-18).
+  // Registering treeView immediately ensures VS Code has a provider right away.
   const treeView = vscode.window.createTreeView('icebergExplorer', {
     treeDataProvider: treeProvider,
     showCollapseAll: false,
   });
   context.subscriptions.push(treeView);
+
+  // Mark tree as initialized to dismiss viewsWelcome loading state
+  void vscode.commands.executeCommand('setContext', 'icebergExplorer.initialized', true);
+  logger.info('Iceberg Explorer tree view registered');
+
+  const queryEngine = new QueryEngine(logger, context.extensionUri);
+  // Warm up WASM asynchronously so activation remains snappy.
+  setTimeout(() => queryEngine.warmUp(), 0);
+  // Ensure the worker thread is terminated when the extension is deactivated.
+  context.subscriptions.push({ dispose: () => queryEngine.dispose() });
 
   const panelManager = new WebviewPanelManager(
     context,
