@@ -167,6 +167,21 @@ export function getConnectionDashboardHtml(
     }
     .action-link:hover { opacity: 0.8; }
 
+    .table-link {
+      color: var(--vscode-textLink-foreground);
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      background: none;
+      border: none;
+      padding: 0;
+      font: inherit;
+      text-align: left;
+    }
+    .table-link:hover {
+      text-decoration: underline;
+    }
+
     #loading {
       padding: 3rem 1rem;
       text-align: center;
@@ -318,10 +333,9 @@ export function getConnectionDashboardHtml(
         const tr = document.createElement('tr');
         tr.innerHTML = \`
           <td><code style="color: var(--vscode-symbolIcon-classForeground, #4ec9b0);">\${esc(t.schema)}</code></td>
-          <td><strong>\${esc(t.name)}</strong></td>
+          <td><button class="table-link" data-action="overview" data-path="\${esc(t.path)}" title="Open table overview">\${esc(t.name)}</button></td>
           <td style="font-family: monospace; font-size: 0.85rem; color: var(--vscode-descriptionForeground);">\${esc(t.path)}</td>
           <td>
-            <button class="action-link" data-action="overview" data-path="\${esc(t.path)}">Open</button>
             <button class="action-link" data-action="query" data-path="\${esc(t.path)}">Query SQL</button>
           </td>
         \`;
@@ -330,8 +344,8 @@ export function getConnectionDashboardHtml(
     }
 
     document.getElementById('tables-tbody')?.addEventListener('click', (e) => {
-      const target = e.target;
-      if (target.classList.contains('action-link')) {
+      const target = e.target.closest('[data-action]');
+      if (target) {
         const action = target.getAttribute('data-action');
         const path = target.getAttribute('data-path');
         if (action === 'overview' && path) {

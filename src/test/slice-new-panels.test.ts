@@ -241,6 +241,8 @@ async function runTests() {
     assert.ok(html.includes('id="stat-tables"'), 'Contains tables stat card');
     assert.ok(html.includes('id="table-search"'), 'Contains searchable table roster input');
     assert.ok(html.includes('id="edit-settings-btn"'), 'Contains Edit Settings button');
+    assert.ok(html.includes('table-link'), 'Contains table-link styling for clickable table name');
+    assert.ok(!html.includes('>Open</button>'), 'Does not contain separate Open button');
   });
 
   await test('Connection Dashboard: lists schemas and tables with inventory counts', async () => {
