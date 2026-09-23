@@ -325,7 +325,7 @@ export function getSettingsHtml(
     } else if (!isS3 && !path.startsWith('/')) {
       showError('err-path', 'Warehouse path must be an absolute path (starting with /).');
       valid = false;
-    } else if (isS3 && !/^s3[an]?:\/\/[^/]+/i.test(path)) {
+    } else if (isS3 && !new RegExp('^s3[an]?://[^/]+', 'i').test(path)) {
       showError('err-path', 'Warehouse path must be a valid S3 URI (e.g. s3://bucket/warehouse-path).');
       valid = false;
     }
@@ -392,6 +392,27 @@ export function getSettingsHtml(
   // Clear field errors when the user types
   connLabel.addEventListener('input', function () {
     var el = document.getElementById('err-label');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+  warehousePath.addEventListener('input', function () {
+    var el = document.getElementById('err-path');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+  endpointUrl.addEventListener('input', function () {
+    var el = document.getElementById('err-endpoint');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  });
+  region.addEventListener('input', function () {
+    var el = document.getElementById('err-region');
     if (el) {
       el.textContent = '';
       el.classList.remove('visible');

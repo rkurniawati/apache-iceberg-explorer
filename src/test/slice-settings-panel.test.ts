@@ -759,6 +759,18 @@ void (async () => {
     });
   });
 
+  await run('Settings panel client script contains valid JavaScript syntax without parse errors', async () => {
+    const { getSettingsHtml } = await import('../panels/html/settings.js');
+    const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
+    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+    assert.ok(scriptMatches.length > 0, 'Settings HTML should contain at least one <script> tag');
+    for (const match of scriptMatches) {
+      assert.doesNotThrow(() => {
+        new Function('acquireVsCodeApi', match[1]);
+      }, 'Settings webview script must not have syntax errors');
+    }
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);
