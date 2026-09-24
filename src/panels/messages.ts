@@ -124,6 +124,12 @@ export interface LoadConnectionDashboardMessage {
   schemasCount: number;
   tablesCount: number;
   tables: DiscoveredTableItem[];
+  initialFilter?: string;
+}
+
+export interface SetDashboardFilterMessage {
+  type: 'setFilter';
+  filter: string;
 }
 
 export interface ManifestArchitectureCard {
@@ -176,7 +182,8 @@ export type PanelMessage =
   | LoadDataPreviewMessage
   | LoadConnectionDashboardMessage
   | LoadMetadataArchitectureMessage
-  | LoadManifestDataFilesMessage;
+  | LoadManifestDataFilesMessage
+  | SetDashboardFilterMessage;
 
 // ── Webview → Host ────────────────────────────────────────────────────────────
 

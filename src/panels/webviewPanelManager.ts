@@ -185,6 +185,8 @@ export class WebviewPanelManager {
     private readonly queryEngine?: QueryEngine,
     /** Optional callback to reveal a resource path in the tree view. */
     private readonly revealPath?: (resourcePath: string) => void | Promise<void>,
+    /** Optional callback to retrieve saved connection configs. */
+    private readonly getConnectionConfigs?: () => ConnectionConfig[],
   ) {}
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -324,7 +326,7 @@ export class WebviewPanelManager {
           void this.openManifestFilePanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
           this.logger.info(`Breadcrumb navigate: segment=${msg.segment} resource=${resourcePath}`);
-          this._handleBreadcrumbNavigate(resourcePath, msg.segment);
+          void this._handleBreadcrumbNavigate(resourcePath, msg.segment, handle, adapter);
         }
       },
       undefined,
@@ -429,7 +431,7 @@ export class WebviewPanelManager {
           void this.openParquetPreviewPanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
           this.logger.info(`Breadcrumb navigate: segment=${msg.segment} resource=${resourcePath}`);
-          this._handleBreadcrumbNavigate(resourcePath, msg.segment);
+          void this._handleBreadcrumbNavigate(resourcePath, msg.segment, handle, adapter);
         }
       },
       undefined,
@@ -530,7 +532,7 @@ export class WebviewPanelManager {
           void this.openAdHocQueryPanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
           this.logger.info(`Breadcrumb navigate: segment=${msg.segment} resource=${resourcePath}`);
-          this._handleBreadcrumbNavigate(resourcePath, msg.segment);
+          void this._handleBreadcrumbNavigate(resourcePath, msg.segment, handle, adapter);
         }
       },
       undefined,
@@ -657,7 +659,7 @@ export class WebviewPanelManager {
           this.logger.info(`Ad-hoc query cancelled: resource=${resourcePath}`);
         } else if (msg.type === 'breadcrumbNavigate') {
           this.logger.info(`Breadcrumb navigate: segment=${msg.segment} resource=${resourcePath}`);
-          this._handleBreadcrumbNavigate(resourcePath, msg.segment);
+          void this._handleBreadcrumbNavigate(resourcePath, msg.segment, handle, adapter);
         }
       },
       undefined,
@@ -1213,7 +1215,7 @@ export class WebviewPanelManager {
         const record = this.registry.get(key);
         const rp = record?.resourcePath ?? '';
         this.logger.info(`Breadcrumb navigate: segment=${msg.segment} resource=${rp}`);
-        if (rp) { this._handleBreadcrumbNavigate(rp, msg.segment); }
+        if (rp && record) { void this._handleBreadcrumbNavigate(rp, msg.segment, record.handle, record.adapter); }
         break;
       }
       case 'openManifestList': {
@@ -1252,19 +1254,42 @@ export class WebviewPanelManager {
     }
   }
 
-  /**
-   * Resolve the clicked breadcrumb segment to a resource path and call
-   * revealPath so the tree view scrolls to that node.
-   *
-   * resourcePathToBreadcrumbs produces 4 segments for the "metadata" path
-   * pattern: [root, schema, table, file].  The "metadata" directory component
-   * sits between table and file in the real path but is omitted from the
-   * breadcrumbs.  We mirror the same index arithmetic used by that function so
-   * that each breadcrumb segment maps to the correct real path prefix.
-   */
-  private _handleBreadcrumbNavigate(resourcePath: string, segmentIndex: number): void {
-    if (!this.revealPath) { return; }
+  private _getConnectionConfig(handle?: ActiveConnectionHandle, targetPath?: string): ConnectionConfig | undefined {
+    let config: ConnectionConfig | undefined;
+    if (this.getConnectionConfigs) {
+      const configs = this.getConnectionConfigs();
+      const norm = (p: string | undefined) => (p ? p.replace(/\\/g, '/').replace(/\/$/, '') : '');
+      const handleNorm = handle ? norm(handle.warehousePath) : '';
+      const targetNorm = targetPath ? norm(targetPath) : '';
+      config = (handleNorm ? configs.find((c) => norm(c.warehousePath) === handleNorm) : undefined)
+        || (targetNorm ? configs.find((c) => norm(c.warehousePath) === targetNorm || targetNorm.startsWith(norm(c.warehousePath) + '/') || norm(c.warehousePath).startsWith(targetNorm + '/')) : undefined)
+        || configs[0];
+    }
+    if (!config && handle) {
+      const wp = handle.warehousePath || targetPath || 'warehouse';
+      config = {
+        id: wp,
+        label: lastPathSegment(wp) || 'Warehouse',
+        connectionType: handle.connectionType || 'local',
+        warehousePath: wp,
+        sslVerification: true,
+        savedAt: Date.now(),
+      };
+    }
+    return config;
+  }
 
+  /**
+   * Resolve the clicked breadcrumb segment to a resource path, reveal the tree node,
+   * and navigate the webview to the corresponding overview/table panel.
+   */
+  private async _handleBreadcrumbNavigate(
+    resourcePath: string,
+    segmentIndex: number,
+    handle?: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    const effectiveAdapter = adapter ?? this.storageAdapter;
     const breadcrumbs = resourcePathToBreadcrumbs(resourcePath);
     // Last segment is the file itself (never clickable); guard anyway.
     if (segmentIndex >= breadcrumbs.length - 1) { return; }
@@ -1280,35 +1305,23 @@ export class WebviewPanelManager {
       parts = normalised.split('/').filter(Boolean);
     }
 
-    // Find where each breadcrumb segment sits in `parts`, using the same
-    // rules as resourcePathToBreadcrumbs.
-    //
-    // For the metadata path pattern (metaIdx found):
-    //   parts = [...root..., schema, table, 'metadata', file]
-    //   segment 0 (root)   → parts[0..metaIdx-3]  → endIdx = metaIdx - 3
-    //   segment 1 (schema) → parts[metaIdx-2]      → endIdx = metaIdx - 2
-    //   segment 2 (table)  → parts[metaIdx-1]      → endIdx = metaIdx - 1
-    //   segment 3 (file)   → not clickable
-    //
-    // For the data path / fallback pattern (last-4 tail, no metadata dir):
-    //   Every breadcrumb segment maps 1-to-1 to a real part; the only
-    //   compression is the root segment absorbing leading parts.
     const metaIdx = parts.lastIndexOf('metadata');
+    const folderIdx = metaIdx >= 0 ? metaIdx : parts.lastIndexOf('data');
     const n = breadcrumbs.length;
 
     let endPartIndex: number;
 
-    if (metaIdx >= 0 && n === 4) {
-      // Standard metadata path pattern — mirror resourcePathToBreadcrumbs exactly.
+    if (folderIdx >= 0 && n === 4) {
+      // Standard metadata/data path pattern — mirror resourcePathToBreadcrumbs exactly.
       if (segmentIndex === 0) {
-        endPartIndex = metaIdx - 3;         // last part of root prefix
+        endPartIndex = folderIdx - 3;         // last part of root prefix
       } else if (segmentIndex === 1) {
-        endPartIndex = metaIdx - 2;         // schema
+        endPartIndex = folderIdx - 2;         // schema
       } else {
-        endPartIndex = metaIdx - 1;         // table (segmentIndex === 2)
+        endPartIndex = folderIdx - 1;         // table (segmentIndex === 2)
       }
     } else {
-      // Fallback / data-path pattern: root absorbs leading parts,
+      // Fallback / data-path / table-path pattern: root absorbs leading parts,
       // all other segments map 1:1.
       const rootPartCount = parts.length - (n - 1);
       if (segmentIndex === 0) {
@@ -1326,7 +1339,55 @@ export class WebviewPanelManager {
       : '/' + targetParts.join('/');
 
     this.logger.info(`Breadcrumb navigate → resolved path: ${targetPath}`);
-    void this.revealPath(targetPath);
+    if (this.revealPath) {
+      void this.revealPath(targetPath);
+    }
+
+    if (segmentIndex === 0) {
+      // Top-most overview page (bucket name / warehouse root)
+      const config = this._getConnectionConfig(handle, targetPath);
+      if (config && handle) {
+        await this.openConnectionDashboardPanel(config, handle, effectiveAdapter, '');
+      } else {
+        void vscode.commands.executeCommand('icebergExplorer.openConnectionDashboard', undefined, '');
+      }
+    } else if (folderIdx >= 0 && n === 4 && segmentIndex === 2) {
+      // Table segment clicked from a child metadata/data panel
+      if (handle) {
+        await this.openTableOverviewPanel(targetPath, handle, effectiveAdapter);
+      } else {
+        void vscode.commands.executeCommand('icebergExplorer.openTableOverview', targetPath);
+      }
+    } else if (segmentIndex === 1) {
+      // Schema container segment
+      const schemaName = breadcrumbs[1];
+      const config = this._getConnectionConfig(handle, targetPath);
+      if (config && handle) {
+        await this.openConnectionDashboardPanel(config, handle, effectiveAdapter, schemaName);
+      } else {
+        void vscode.commands.executeCommand('icebergExplorer.openConnectionDashboard', undefined, schemaName);
+      }
+    } else {
+      // Fallback: check if target is a table
+      let isTab = false;
+      if (handle) {
+        try {
+          const res = await effectiveAdapter.isTable(handle, targetPath);
+          isTab = res === true;
+        } catch {
+          isTab = false;
+        }
+      }
+      if (isTab && handle) {
+        await this.openTableOverviewPanel(targetPath, handle, effectiveAdapter);
+      } else {
+        const segName = breadcrumbs[segmentIndex];
+        const config = this._getConnectionConfig(handle, targetPath);
+        if (config && handle) {
+          await this.openConnectionDashboardPanel(config, handle, effectiveAdapter, segName);
+        }
+      }
+    }
   }
 
   /**
@@ -1382,7 +1443,7 @@ export class WebviewPanelManager {
             void this.loadTableOverview(gate, tablePath, handle, effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
-            this._handleBreadcrumbNavigate(tablePath, msg.segment);
+            void this._handleBreadcrumbNavigate(tablePath, msg.segment, handle, effectiveAdapter);
             break;
           case 'openAdHocQuery':
             void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
@@ -1413,6 +1474,7 @@ export class WebviewPanelManager {
     config: ConnectionConfig,
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
+    initialFilter?: string,
   ): Promise<void> {
     const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.ConnectionDashboard, config.id);
@@ -1421,7 +1483,9 @@ export class WebviewPanelManager {
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=connectionDashboard resource=${config.id}`);
-      if (existing.gate) {
+      if (initialFilter !== undefined && existing.gate) {
+        existing.gate.post({ type: 'setFilter', filter: initialFilter });
+      } else if (existing.gate) {
         existing.gate.repost();
       }
       return;
@@ -1455,7 +1519,7 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadConnectionDashboard(gate, config, handle, effectiveAdapter);
+            void this.loadConnectionDashboard(gate, config, handle, effectiveAdapter, initialFilter);
             break;
           case 'openAdHocQuery':
             void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
@@ -1473,7 +1537,7 @@ export class WebviewPanelManager {
     );
 
     this.logger.info(`Panel opened: type=connectionDashboard resource=${config.id}`);
-    await this.loadConnectionDashboard(gate, config, handle, effectiveAdapter);
+    await this.loadConnectionDashboard(gate, config, handle, effectiveAdapter, initialFilter);
   }
 
   /**
@@ -1529,7 +1593,7 @@ export class WebviewPanelManager {
             void this.loadMetadataArchitecture(gate, tablePath, handle, effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
-            this._handleBreadcrumbNavigate(tablePath, msg.segment);
+            void this._handleBreadcrumbNavigate(tablePath, msg.segment, handle, effectiveAdapter);
             break;
           case 'openTableOverview':
             void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
@@ -1801,6 +1865,7 @@ export class WebviewPanelManager {
     config: ConnectionConfig,
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter,
+    initialFilter?: string,
   ): Promise<void> {
     gate.post({ type: 'setState', state: 'loading' });
 
@@ -1858,6 +1923,7 @@ export class WebviewPanelManager {
       schemasCount: discoveredSchemas.size > 0 ? discoveredSchemas.size : schemasResult.length,
       tablesCount: tables.length,
       tables,
+      initialFilter: initialFilter ?? '',
     });
   }
 

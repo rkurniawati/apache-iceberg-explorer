@@ -101,17 +101,18 @@ export function registerTreeCommands(
   );
 
   // ── icebergExplorer.openConnectionDashboard ──────────────────────────────
-  // Arguments: [id: string]
+  // Arguments: [id?: string, initialFilter?: string]
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'icebergExplorer.openConnectionDashboard',
-      async (id: string) => {
-        logger.info(`openConnectionDashboard command: id=${id}`);
+      async (id?: string, initialFilter?: string) => {
+        logger.info(`openConnectionDashboard command: id=${id} filter=${initialFilter}`);
         const configs = listConnections();
-        const config = configs.find(c => c.id === id);
+        const activeId = id ?? provider.getActiveConnectionId();
+        const config = activeId ? configs.find(c => c.id === activeId) : configs[0];
         const handle = provider.getActiveHandle();
         if (!config || !handle) { return; }
-        void panelManager.openConnectionDashboardPanel(config, handle, provider.getStorageAdapter());
+        void panelManager.openConnectionDashboardPanel(config, handle, provider.getStorageAdapter(), initialFilter);
       },
     ),
   );

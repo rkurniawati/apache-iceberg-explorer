@@ -106,13 +106,15 @@ export class IcebergTreeProvider
     this._onDidChangeTreeData.fire(undefined);
   }
 
-  /**
-   * Mark a connection as active by config id.  Used after activating a connection
-   * so its tree node renders with the active icon and expands to show schemas.
-   */
+  /** Mark a connection as active by config id. */
   setActiveConnectionId(id: string | null): void {
     this.activeConnectionId = id;
     // Do not fire here — callers will call setActiveConnection which also fires.
+  }
+
+  /** Returns the ID of the currently active connection, or null. */
+  getActiveConnectionId(): string | null {
+    return this.activeConnectionId;
   }
 
   /** Returns the currently active storage adapter. */

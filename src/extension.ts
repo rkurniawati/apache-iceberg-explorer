@@ -105,6 +105,7 @@ export function activate(context: vscode.ExtensionContext): void {
         logger.warn(`Tree reveal failed: ${msg}`);
       }
     },
+    () => connectionManager.listConnections(),
   );
 
   // Register the settings command (FR-1, AC-1).

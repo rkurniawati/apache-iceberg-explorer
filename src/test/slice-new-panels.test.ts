@@ -28,7 +28,7 @@ import { PanelType, panelRegistryKey } from '../panels/types.js';
 import { getTableOverviewHtml } from '../panels/html/tableOverview.js';
 import { getConnectionDashboardHtml } from '../panels/html/connectionDashboard.js';
 import { getMetadataArchitectureHtml } from '../panels/html/metadataArchitecture.js';
-import { makeTableItem, makeMetadataFolderItem, makeConnectionItem } from '../tree/types.js';
+import { makeTableItem, makeMetadataFolderItem, makeConnectionItem, makeSchemaItem } from '../tree/types.js';
 import { analyzeQuery } from '../query/sqlAnalyzer.js';
 
 interface PostedMessage {
@@ -756,6 +756,136 @@ async function runTests() {
     assert.ok(item.command, 'Metadata folder item has command');
     assert.strictEqual(item.command?.command, 'icebergExplorer.openMetadataArchitecture');
     assert.deepStrictEqual(item.command?.arguments, ['s3://warehouse/db/events']);
+  });
+
+  await test('Tree items: schema node has openConnectionDashboard command with schema filter', () => {
+    const item = makeSchemaItem('s3://warehouse/db', 'db', 's3://warehouse');
+    assert.ok(item.command, 'Schema item has command');
+    assert.strictEqual(item.command?.command, 'icebergExplorer.openConnectionDashboard');
+    assert.deepStrictEqual(item.command?.arguments, [undefined, 'db']);
+  });
+
+  await test('Breadcrumb navigate: segment 0 (bucket) navigates to top-most overview (Connection Dashboard)', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      (p) => { revealedPath = p; },
+      () => [{ id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 }],
+    );
+
+    await manager.openTableOverviewPanel('s3://warehouse/db/events', handle, adapter);
+    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
+    const tableRecord = (manager as any).registry.get(tableKey);
+    assert.ok(tableRecord, 'Table overview opened');
+
+    // Simulate breadcrumb click on segment 0 ("warehouse" bucket)
+    (tableRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 0 });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(revealedPath, 's3://warehouse');
+    const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
+    const dashRecord = (manager as any).registry.get(dashKey);
+    assert.ok(dashRecord, 'Connection dashboard opened on bucket breadcrumb navigation');
+    const lastMsg = dashRecord.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
+    assert.strictEqual(lastMsg.initialFilter, '');
+  });
+
+  await test('Breadcrumb navigate: segment 1 (schema) navigates to Connection Dashboard filtered to that schema', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      (p) => { revealedPath = p; },
+      () => [{ id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 }],
+    );
+
+    await manager.openTableOverviewPanel('s3://warehouse/db/events', handle, adapter);
+    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
+    const tableRecord = (manager as any).registry.get(tableKey);
+
+    // Simulate breadcrumb click on segment 1 ("db" schema)
+    (tableRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 1 });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(revealedPath, 's3://warehouse/db');
+    const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
+    const dashRecord = (manager as any).registry.get(dashKey);
+    assert.ok(dashRecord, 'Connection dashboard opened on schema breadcrumb navigation');
+    const lastMsg = dashRecord.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
+    assert.strictEqual(lastMsg.initialFilter, 'db');
+  });
+
+  await test('Breadcrumb navigate: segment 2 (table) in child panel navigates to Table Overview', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      (p) => { revealedPath = p; },
+    );
+
+    await manager.openMetadataDetailPanel('s3://warehouse/db/events/metadata/v1.metadata.json', handle, adapter);
+    const metaKey = panelRegistryKey(PanelType.MetadataDetail, 's3://warehouse/db/events/metadata/v1.metadata.json');
+    const metaRecord = (manager as any).registry.get(metaKey);
+
+    // Simulate breadcrumb click on segment 2 ("events" table)
+    (metaRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 2 });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(revealedPath, 's3://warehouse/db/events');
+    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
+    const tableRecord = (manager as any).registry.get(tableKey);
+    assert.ok(tableRecord, 'Table overview opened on table breadcrumb navigation');
+  });
+
+  await test('Breadcrumb navigate on existing Connection Dashboard posts setFilter message', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      undefined,
+      () => [{ id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 }],
+    );
+
+    const config: ConnectionConfig = { id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 };
+    await manager.openConnectionDashboardPanel(config, handle, adapter);
+    const initialDashRecord = (manager as any).registry.get(panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1'));
+    (initialDashRecord.panel.webview as any)._receiveMessage({ type: 'webviewReady' });
+
+    await manager.openTableOverviewPanel('s3://warehouse/db/events', handle, adapter);
+    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
+    const tableRecord = (manager as any).registry.get(tableKey);
+
+    // Click segment 1 (schema)
+    (tableRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 1 });
+    await new Promise((r) => setTimeout(r, 50));
+
+    const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
+    const dashRecord = (manager as any).registry.get(dashKey);
+    const msgs = (dashRecord.panel.webview as any)._getMessages();
+    const setFilterMsg = msgs.find((m: any) => m.type === 'setFilter');
+    assert.ok(setFilterMsg, 'setFilter message posted to existing dashboard');
+    assert.strictEqual(setFilterMsg.filter, 'db');
   });
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

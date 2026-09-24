@@ -74,6 +74,11 @@ export function makeSchemaItem(schemaPath: string, label: string, parentPath?: s
     parentPath,
   );
   item.iconPath = new vscode.ThemeIcon('database');
+  item.command = {
+    command: 'icebergExplorer.openConnectionDashboard',
+    title: 'View Schema Tables',
+    arguments: [undefined, label],
+  };
   return item;
 }
 

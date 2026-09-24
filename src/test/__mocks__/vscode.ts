@@ -101,6 +101,7 @@ export const window = {
     _options?: unknown,
   ) {
     const messages: unknown[] = [];
+    const messageHandlers: Array<(msg: unknown) => void> = [];
     const disposeListeners: Array<() => void> = [];
     return {
       viewType,
@@ -109,7 +110,11 @@ export const window = {
         html: '',
         cspSource: 'vscode-resource:',
         postMessage(msg: unknown) { messages.push(msg); },
-        onDidReceiveMessage(_handler: unknown) { return { dispose() {} }; },
+        onDidReceiveMessage(handler: (msg: unknown) => void) {
+          messageHandlers.push(handler);
+          return { dispose() { const idx = messageHandlers.indexOf(handler); if (idx >= 0) messageHandlers.splice(idx, 1); } };
+        },
+        _receiveMessage(msg: unknown) { messageHandlers.forEach(h => h(msg)); },
         _getMessages() { return messages; },
       },
       reveal(_col: unknown) {},

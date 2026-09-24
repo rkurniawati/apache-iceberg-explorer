@@ -52,10 +52,11 @@ export function resourcePathToBreadcrumbs(resourcePath: string): string[] {
     const withoutScheme = normalised.slice('s3://'.length);
     parts = withoutScheme.split('/').filter(Boolean);
     const metaIdx = parts.lastIndexOf('metadata');
-    if (metaIdx >= 3) {
-      const root = parts.slice(0, metaIdx - 2).join('/');
-      const schema = parts[metaIdx - 2];
-      const table = parts[metaIdx - 1];
+    const folderIdx = metaIdx >= 0 ? metaIdx : parts.lastIndexOf('data');
+    if (folderIdx >= 3) {
+      const root = parts.slice(0, folderIdx - 2).join('/');
+      const schema = parts[folderIdx - 2];
+      const table = parts[folderIdx - 1];
       const file = parts[parts.length - 1];
       return [root, schema!, table!, file!];
     }
@@ -67,10 +68,11 @@ export function resourcePathToBreadcrumbs(resourcePath: string): string[] {
   // Local path
   parts = normalised.split('/').filter(Boolean);
   const metaIdx = parts.lastIndexOf('metadata');
-  if (metaIdx >= 2) {
-    const root = '/' + parts.slice(0, metaIdx - 2).join('/');
-    const schema = parts[metaIdx - 2];
-    const table = parts[metaIdx - 1];
+  const folderIdx = metaIdx >= 0 ? metaIdx : parts.lastIndexOf('data');
+  if (folderIdx >= 2) {
+    const root = '/' + parts.slice(0, folderIdx - 2).join('/');
+    const schema = parts[folderIdx - 2];
+    const table = parts[folderIdx - 1];
     const file = parts[parts.length - 1];
     return [root, schema!, table!, file!];
   }

@@ -322,6 +322,10 @@ export function getConnectionDashboardHtml(
     });
 
     function renderTables(tables) {
+      const countEl = document.getElementById('tables-count');
+      if (countEl) {
+        countEl.textContent = tables.length;
+      }
       const tbody = document.getElementById('tables-tbody');
       tbody.innerHTML = '';
       if (tables.length === 0) {
@@ -396,10 +400,31 @@ export function getConnectionDashboardHtml(
 
         document.getElementById('stat-schemas').textContent = msg.schemasCount;
         document.getElementById('stat-tables').textContent = msg.tablesCount;
-        document.getElementById('tables-count').textContent = msg.tablesCount;
 
         allTables = msg.tables || [];
-        renderTables(allTables);
+        const searchInput = document.getElementById('table-search');
+        const filterVal = msg.initialFilter || '';
+        if (searchInput) {
+          searchInput.value = filterVal;
+        }
+        const q = filterVal.toLowerCase();
+        if (q) {
+          renderTables(allTables.filter(t => (t.name && t.name.toLowerCase().includes(q)) || (t.schema && t.schema.toLowerCase().includes(q))));
+        } else {
+          renderTables(allTables);
+        }
+      } else if (msg.type === 'setFilter') {
+        const searchInput = document.getElementById('table-search');
+        const filterVal = msg.filter || '';
+        if (searchInput) {
+          searchInput.value = filterVal;
+        }
+        const q = filterVal.toLowerCase();
+        if (q) {
+          renderTables(allTables.filter(t => (t.name && t.name.toLowerCase().includes(q)) || (t.schema && t.schema.toLowerCase().includes(q))));
+        } else {
+          renderTables(allTables);
+        }
       }
     });
 
