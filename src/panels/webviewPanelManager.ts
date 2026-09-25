@@ -1877,7 +1877,6 @@ export class WebviewPanelManager {
     }
 
     const tables: DiscoveredTableItem[] = [];
-    const discoveredSchemas = new Set<string>();
 
     const exploreDirectory = async (
       dirPath: string,
@@ -1899,7 +1898,6 @@ export class WebviewPanelManager {
       // If not a table, treat as a schema / namespace folder
       const nsName = lastPathSegment(dirPath);
       const currentNamespace = parentNamespace ? `${parentNamespace}.${nsName}` : nsName;
-      discoveredSchemas.add(currentNamespace);
 
       const subEntries = await adapter.listTables(handle, dirPath);
       if (!isStorageError(subEntries)) {
@@ -1920,7 +1918,7 @@ export class WebviewPanelManager {
       warehousePath: config.warehousePath,
       region: config.region,
       endpointUrl: config.endpointUrl,
-      schemasCount: discoveredSchemas.size > 0 ? discoveredSchemas.size : schemasResult.length,
+      schemasCount: schemasResult.length,
       tablesCount: tables.length,
       tables,
       initialFilter: initialFilter ?? '',

@@ -3,6 +3,9 @@
  */
 
 import type { ConnectionConfig } from './types.js';
+import type { ActiveConnectionHandle } from '../storage/types.js';
+import type { StorageAdapter } from '../storage/StorageAdapter.js';
+import { isStorageError } from '../storage/errors.js';
 
 export interface FieldError {
   field: string;
@@ -103,4 +106,72 @@ export function validateConnectionInput(
   }
 
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Validates that the warehouse path contains at least one schema directory with a table directly under it.
+ * Rejects paths that are too high (e.g. bucket root where schemas are nested) or too deep (e.g. table directory).
+ */
+export async function validateWarehouseStructure(
+  handle: ActiveConnectionHandle,
+  adapter: StorageAdapter,
+): Promise<ValidationResult> {
+  const schemas = await adapter.listSchemas(handle);
+  if (isStorageError(schemas)) {
+    return {
+      valid: false,
+      errors: [
+        {
+          field: 'warehousePath',
+          message: `Could not access warehouse path: ${schemas.message}`,
+        },
+      ],
+    };
+  }
+
+  if (schemas.length === 0) {
+    return {
+      valid: false,
+      errors: [
+        {
+          field: 'warehousePath',
+          message:
+            'No schemas found in warehouse path. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. s3://warehouse-path/<schema>/<table>/).',
+        },
+      ],
+    };
+  }
+
+  let foundTable = false;
+  for (const schemaPath of schemas) {
+    const tables = await adapter.listTables(handle, schemaPath);
+    if (isStorageError(tables)) {
+      continue;
+    }
+    for (const tableCandidate of tables) {
+      const isTab = await adapter.isTable(handle, tableCandidate);
+      if (!isStorageError(isTab) && isTab === true) {
+        foundTable = true;
+        break;
+      }
+    }
+    if (foundTable) {
+      break;
+    }
+  }
+
+  if (!foundTable) {
+    return {
+      valid: false,
+      errors: [
+        {
+          field: 'warehousePath',
+          message:
+            'No Iceberg tables found under any schema directory. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. s3://warehouse-path/<schema>/<table>/).',
+        },
+      ],
+    };
+  }
+
+  return { valid: true };
 }

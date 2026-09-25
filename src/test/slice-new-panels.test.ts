@@ -537,6 +537,7 @@ async function runTests() {
 
     const lastMsg = record.gate.getTerminalMessage() as any;
     assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
+    assert.strictEqual(lastMsg.schemasCount, 1, 'Only direct warehouse subdirectories counted as schemas');
     assert.strictEqual(lastMsg.tablesCount, 1, 'Discovered 1 actual table');
     assert.strictEqual(lastMsg.tables[0].name, 'dogtable1', 'Table name is dogtable1');
     assert.strictEqual(lastMsg.tables[0].path, 's3://rk-iceberg/dogs/testdogs.db/dogtable1');

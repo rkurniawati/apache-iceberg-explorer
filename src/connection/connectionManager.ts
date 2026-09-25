@@ -14,7 +14,8 @@ import * as crypto from 'node:crypto';
 import type { ILogger } from '../extension.js';
 import type { ConnectionConfig } from './types.js';
 import type { ActiveConnectionHandle, S3Config } from '../storage/types.js';
-import { validateConnectionInput } from './validation.js';
+import type { StorageAdapter } from '../storage/StorageAdapter.js';
+import { validateConnectionInput, validateWarehouseStructure } from './validation.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -102,6 +103,7 @@ export class ConnectionManager {
   async saveConnection(
     config: Omit<ConnectionConfig, 'id' | 'savedAt'> & { id?: string },
     credentials: { accessKey?: string; secretKey?: string },
+    adapter?: StorageAdapter,
   ): Promise<string | Error> {
     const fullConfig: ConnectionConfig = {
       ...config,
@@ -136,6 +138,32 @@ export class ConnectionManager {
       const msg = validation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
       this._logger.warn(`ConnectionManager.saveConnection: validation failed — ${msg}`);
       return new Error(`Validation failed: ${msg}`);
+    }
+
+    if (adapter) {
+      let handle: ActiveConnectionHandle;
+      if (fullConfig.connectionType === 's3') {
+        const s3Config = buildS3Config(fullConfig, {
+          ak: effectiveCreds.accessKey.trim(),
+          sk: effectiveCreds.secretKey.trim(),
+        });
+        handle = {
+          connectionType: 's3',
+          warehousePath: fullConfig.warehousePath,
+          s3Config,
+        };
+      } else {
+        handle = {
+          connectionType: 'local',
+          warehousePath: fullConfig.warehousePath,
+        };
+      }
+      const structureValidation = await validateWarehouseStructure(handle, adapter);
+      if (!structureValidation.valid) {
+        const msg = structureValidation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
+        this._logger.warn(`ConnectionManager.saveConnection: warehouse structure validation failed — ${msg}`);
+        return new Error(`Validation failed: ${msg}`);
+      }
     }
 
     const credsChanged = !isMaskedCredential(credentials.accessKey) || !isMaskedCredential(credentials.secretKey);

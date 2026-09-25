@@ -474,6 +474,15 @@ export function getSettingsHtml(
           }
           showError('err-label', labelMsg);
         }
+        if (msg.message && (msg.message.includes('warehousePath:') || msg.message.toLowerCase().includes('warehouse path'))) {
+          var pathMsg = msg.message;
+          if (pathMsg.includes('warehousePath:')) {
+            pathMsg = pathMsg.split('warehousePath:')[1].trim();
+          } else if (pathMsg.startsWith('Validation failed:')) {
+            pathMsg = pathMsg.replace('Validation failed:', '').trim();
+          }
+          showError('err-path', pathMsg);
+        }
         break;
       case 'activateSuccess':
         showBanner('Connection activated.', false);

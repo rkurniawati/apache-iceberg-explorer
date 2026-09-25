@@ -119,7 +119,8 @@ export function activate(context: vscode.ExtensionContext): void {
         // saveConnection returns string | Error; throw on Error so the panel
         // can post saveError (design.md §2.5.2)
         async (config, creds) => {
-          const result = await connectionManager.saveConnection(config, creds);
+          const adapter = config.connectionType === 's3' ? s3Adapter : localFsAdapter;
+          const result = await connectionManager.saveConnection(config, creds, adapter);
           if (result instanceof Error) { throw result; }
           // Keep the tree in sync after save
           treeProvider.setConnections(connectionManager.listConnections());

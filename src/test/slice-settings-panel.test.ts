@@ -16,7 +16,7 @@ import { storageError } from '../storage/errors';
 import type { StorageError } from '../storage/errors';
 import type { ILogger } from '../extension';
 import { WebviewPanelManager } from '../panels/webviewPanelManager';
-import { validateConnectionInput } from '../connection/validation';
+import { validateConnectionInput, validateWarehouseStructure } from '../connection/validation';
 import { ConnectionManager } from '../connection/connectionManager';
 
 // ---------------------------------------------------------------------------
@@ -769,6 +769,120 @@ void (async () => {
         new Function('acquireVsCodeApi', match[1]);
       }, 'Settings webview script must not have syntax errors');
     }
+  });
+
+  // ── Warehouse structure validation ──────────────────────────────────────────
+  function makeMockAdapterForDogs() {
+    return {
+      async listSchemas(h: ActiveConnectionHandle) {
+        if (h.warehousePath === 's3://rk-iceberg') {
+          return ['s3://rk-iceberg/dogs'];
+        }
+        if (h.warehousePath === 's3://rk-iceberg/dogs') {
+          return ['s3://rk-iceberg/dogs/testdogs.db'];
+        }
+        if (h.warehousePath === 's3://rk-iceberg/dogs/testdogs.db') {
+          return ['s3://rk-iceberg/dogs/testdogs.db/dogtable1'];
+        }
+        return [];
+      },
+      async listTables(_h: ActiveConnectionHandle, p: string) {
+        if (p === 's3://rk-iceberg/dogs') {
+          return ['s3://rk-iceberg/dogs/testdogs.db'];
+        }
+        if (p === 's3://rk-iceberg/dogs/testdogs.db') {
+          return ['s3://rk-iceberg/dogs/testdogs.db/dogtable1'];
+        }
+        if (p === 's3://rk-iceberg/dogs/testdogs.db/dogtable1') {
+          return ['s3://rk-iceberg/dogs/testdogs.db/dogtable1/data', 's3://rk-iceberg/dogs/testdogs.db/dogtable1/metadata'];
+        }
+        return [];
+      },
+      async isTable(_h: ActiveConnectionHandle, p: string) {
+        return p === 's3://rk-iceberg/dogs/testdogs.db/dogtable1';
+      },
+    } as any;
+  }
+
+  await run('validateWarehouseStructure rejects warehouse path s3://rk-iceberg when table is not directly under schema', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: '', client: {} as any },
+    };
+    const res = await validateWarehouseStructure(handle, adapter);
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.strictEqual(res.errors[0].field, 'warehousePath');
+      assert.ok(res.errors[0].message.includes('No Iceberg tables found'));
+    }
+  });
+
+  await run('validateWarehouseStructure rejects warehouse path s3://rk-iceberg/dogs/testdogs.db when schema does not contain table', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg/dogs/testdogs.db',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: 'dogs/testdogs.db', client: {} as any },
+    };
+    const res = await validateWarehouseStructure(handle, adapter);
+    assert.strictEqual(res.valid, false);
+    if (!res.valid) {
+      assert.strictEqual(res.errors[0].field, 'warehousePath');
+    }
+  });
+
+  await run('validateWarehouseStructure accepts warehouse path s3://rk-iceberg/dogs when table is under testdogs.db schema', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg/dogs',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: 'dogs', client: {} as any },
+    };
+    const res = await validateWarehouseStructure(handle, adapter);
+    assert.strictEqual(res.valid, true);
+  });
+
+  await run('ConnectionManager.saveConnection with adapter rejects s3://rk-iceberg and accepts s3://rk-iceberg/dogs', async () => {
+    const ctx = makeFakeContext();
+    const cm = new ConnectionManager(ctx, testLogger);
+    const adapter = makeMockAdapterForDogs();
+
+    // 1. Rejects s3://rk-iceberg
+    const rejectRes = await cm.saveConnection(
+      {
+        label: 'AWS rk-iceberg root',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+      adapter,
+    );
+    assert.ok(rejectRes instanceof Error, 'Expected saveConnection to fail for s3://rk-iceberg');
+    assert.ok(rejectRes.message.includes('warehousePath'));
+
+    // 2. Accepts s3://rk-iceberg/dogs
+    const acceptRes = await cm.saveConnection(
+      {
+        label: 'AWS rk-iceberg dogs',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg/dogs',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      {
+        accessKey: 'AKIAIOSFODNN7EXAMPLE',
+        secretKey: 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY',
+      },
+      adapter,
+    );
+    assert.strictEqual(typeof acceptRes, 'string', 'Expected saveConnection to succeed for s3://rk-iceberg/dogs');
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────
