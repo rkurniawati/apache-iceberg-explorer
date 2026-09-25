@@ -57,6 +57,11 @@
         "category": "Iceberg Explorer"
       },
       {
+        "command": "icebergExplorer.openSchemaOverview",
+        "title": "Open Schema Overview",
+        "category": "Iceberg Explorer"
+      },
+      {
         "command": "icebergExplorer.openConnectionDashboard",
         "title": "Open Connection Dashboard",
         "category": "Iceberg Explorer"

@@ -26,6 +26,7 @@ import type {
 import { WebviewPanelManager } from '../panels/webviewPanelManager.js';
 import { PanelType, panelRegistryKey } from '../panels/types.js';
 import { getTableOverviewHtml } from '../panels/html/tableOverview.js';
+import { getSchemaOverviewHtml } from '../panels/html/schemaOverview.js';
 import { getConnectionDashboardHtml } from '../panels/html/connectionDashboard.js';
 import { getMetadataArchitectureHtml } from '../panels/html/metadataArchitecture.js';
 import { makeTableItem, makeMetadataFolderItem, makeConnectionItem, makeSchemaItem } from '../tree/types.js';
@@ -235,14 +236,24 @@ async function runTests() {
 
   // ─── Phase 2: Connection & Catalog Dashboard ───────────────────────────────
 
-  await test('Connection Dashboard: HTML shell contains inventory metrics and table search', () => {
+  await test('Connection Dashboard: HTML shell contains inventory metrics and schema search, does not list tables', () => {
     const html = getConnectionDashboardHtml('test-nonce', 'vscode-resource:');
     assert.ok(html.includes('id="stat-schemas"'), 'Contains schemas stat card');
     assert.ok(html.includes('id="stat-tables"'), 'Contains tables stat card');
-    assert.ok(html.includes('id="table-search"'), 'Contains searchable table roster input');
+    assert.ok(html.includes('id="schema-search"'), 'Contains searchable schema roster input');
+    assert.ok(html.includes('id="schemas-tbody"'), 'Contains schemas table body');
     assert.ok(html.includes('id="edit-settings-btn"'), 'Contains Edit Settings button');
-    assert.ok(html.includes('table-link'), 'Contains table-link styling for clickable table name');
-    assert.ok(!html.includes('>Open</button>'), 'Does not contain separate Open button');
+    assert.ok(html.includes('data-action="open-schema"'), 'Contains open-schema action links');
+    assert.ok(!html.includes('id="tables-tbody"'), 'Does not list tables on warehouse overview');
+  });
+
+  await test('Schema Overview: HTML shell contains schema info and tables roster', () => {
+    const html = getSchemaOverviewHtml('test-nonce', 'vscode-resource:', 's3://warehouse/db');
+    assert.ok(html.includes('id="schema-title"'), 'Contains schema title');
+    assert.ok(html.includes('id="stat-tables"'), 'Contains tables stat card');
+    assert.ok(html.includes('id="table-search"'), 'Contains searchable table roster input');
+    assert.ok(html.includes('id="tables-tbody"'), 'Contains tables table body');
+    assert.ok(html.includes('id="warehouse-btn"'), 'Contains Warehouse Overview button');
   });
 
   await test('Connection Dashboard: lists schemas and tables with inventory counts', async () => {
@@ -269,6 +280,26 @@ async function runTests() {
     assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
     assert.strictEqual(lastMsg.connectionLabel, 'Production Warehouse');
     assert.strictEqual(lastMsg.schemasCount, 1);
+    assert.strictEqual(lastMsg.tablesCount, 1);
+    assert.strictEqual(lastMsg.schemas.length, 1);
+    assert.strictEqual(lastMsg.schemas[0].name, 'db');
+    assert.strictEqual(lastMsg.schemas[0].tableCount, 1);
+  });
+
+  await test('Schema Overview: lists tables in the selected schema', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger);
+
+    await manager.openSchemaOverviewPanel('s3://warehouse/db', handle, adapter, 'db');
+
+    const key = panelRegistryKey(PanelType.SchemaOverview, 's3://warehouse/db');
+    const record = (manager as any).registry.get(key);
+    assert.ok(record, 'Schema Overview registered');
+
+    const lastMsg = record.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadSchemaOverview');
+    assert.strictEqual(lastMsg.schemaName, 'db');
     assert.strictEqual(lastMsg.tablesCount, 1);
     assert.strictEqual(lastMsg.tables[0].name, 'events');
   });
@@ -542,6 +573,10 @@ async function runTests() {
     assert.strictEqual(lastMsg.tables[0].name, 'dogtable1', 'Table name is dogtable1');
     assert.strictEqual(lastMsg.tables[0].path, 's3://rk-iceberg/dogs/testdogs.db/dogtable1');
     assert.strictEqual(lastMsg.tables[0].schema, 'dogs.testdogs.db', 'Nested namespace formatted as dogs.testdogs.db');
+    assert.strictEqual(lastMsg.schemas.length, 1);
+    assert.strictEqual(lastMsg.schemas[0].name, 'dogs', 'Schema name is direct subdirectory dogs');
+    assert.strictEqual(lastMsg.schemas[0].path, 's3://rk-iceberg/dogs', 'Schema path is s3://rk-iceberg/dogs');
+    assert.strictEqual(lastMsg.schemas[0].tableCount, 1, 'Discovered 1 table under dogs schema');
   });
 
   // ─── SQL Analyzer & Ad-Hoc Query Budgeting ─────────────────────────────────
@@ -789,11 +824,11 @@ async function runTests() {
     assert.deepStrictEqual(item.command?.arguments, ['s3://warehouse/db/events']);
   });
 
-  await test('Tree items: schema node has openConnectionDashboard command with schema filter', () => {
+  await test('Tree items: schema node has openSchemaOverview command', () => {
     const item = makeSchemaItem('s3://warehouse/db', 'db', 's3://warehouse');
     assert.ok(item.command, 'Schema item has command');
-    assert.strictEqual(item.command?.command, 'icebergExplorer.openConnectionDashboard');
-    assert.deepStrictEqual(item.command?.arguments, [undefined, 'db']);
+    assert.strictEqual(item.command?.command, 'icebergExplorer.openSchemaOverview');
+    assert.deepStrictEqual(item.command?.arguments, ['s3://warehouse/db', 'db']);
   });
 
   await test('Breadcrumb navigate: segment 0 (bucket) navigates to top-most overview (Connection Dashboard)', async () => {
@@ -828,7 +863,7 @@ async function runTests() {
     assert.strictEqual(lastMsg.initialFilter, '');
   });
 
-  await test('Breadcrumb navigate: segment 1 (schema) navigates to Connection Dashboard filtered to that schema', async () => {
+  await test('Breadcrumb navigate: segment 1 (schema) navigates to Schema Overview', async () => {
     const logger = makeLogger();
     const adapter = makeStorageAdapter();
     let revealedPath = '';
@@ -851,12 +886,13 @@ async function runTests() {
     await new Promise((r) => setTimeout(r, 50));
 
     assert.strictEqual(revealedPath, 's3://warehouse/db');
-    const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
-    const dashRecord = (manager as any).registry.get(dashKey);
-    assert.ok(dashRecord, 'Connection dashboard opened on schema breadcrumb navigation');
-    const lastMsg = dashRecord.gate.getTerminalMessage() as any;
-    assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
-    assert.strictEqual(lastMsg.initialFilter, 'db');
+    const schemaKey = panelRegistryKey(PanelType.SchemaOverview, 's3://warehouse/db');
+    const schemaRecord = (manager as any).registry.get(schemaKey);
+    assert.ok(schemaRecord, 'Schema overview opened on schema breadcrumb navigation');
+    const lastMsg = schemaRecord.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadSchemaOverview');
+    assert.strictEqual(lastMsg.schemaName, 'db');
+    assert.strictEqual(lastMsg.tablesCount, 1);
   });
 
   await test('Breadcrumb navigate: segment 2 (table) in child panel navigates to Table Overview', async () => {
@@ -886,37 +922,31 @@ async function runTests() {
     assert.ok(tableRecord, 'Table overview opened on table breadcrumb navigation');
   });
 
-  await test('Breadcrumb navigate on existing Connection Dashboard posts setFilter message', async () => {
+  await test('Breadcrumb navigate in Schema Overview: segment 0 (bucket) navigates to Connection Dashboard', async () => {
     const logger = makeLogger();
     const adapter = makeStorageAdapter();
+    let revealedPath = '';
     const manager = new WebviewPanelManager(
       makeContext(),
       adapter,
       logger,
       undefined,
-      undefined,
+      (p) => { revealedPath = p; },
       () => [{ id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 }],
     );
 
-    const config: ConnectionConfig = { id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 };
-    await manager.openConnectionDashboardPanel(config, handle, adapter);
-    const initialDashRecord = (manager as any).registry.get(panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1'));
-    (initialDashRecord.panel.webview as any)._receiveMessage({ type: 'webviewReady' });
+    await manager.openSchemaOverviewPanel('s3://warehouse/db', handle, adapter, 'db');
+    const schemaKey = panelRegistryKey(PanelType.SchemaOverview, 's3://warehouse/db');
+    const schemaRecord = (manager as any).registry.get(schemaKey);
 
-    await manager.openTableOverviewPanel('s3://warehouse/db/events', handle, adapter);
-    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
-    const tableRecord = (manager as any).registry.get(tableKey);
-
-    // Click segment 1 (schema)
-    (tableRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 1 });
+    // Click segment 0 (warehouse)
+    (schemaRecord.panel.webview as any)._receiveMessage({ type: 'breadcrumbNavigate', segment: 0 });
     await new Promise((r) => setTimeout(r, 50));
 
+    assert.strictEqual(revealedPath, 's3://warehouse');
     const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
     const dashRecord = (manager as any).registry.get(dashKey);
-    const msgs = (dashRecord.panel.webview as any)._getMessages();
-    const setFilterMsg = msgs.find((m: any) => m.type === 'setFilter');
-    assert.ok(setFilterMsg, 'setFilter message posted to existing dashboard');
-    assert.strictEqual(setFilterMsg.filter, 'db');
+    assert.ok(dashRecord, 'Connection Dashboard opened from Schema Overview breadcrumb');
   });
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);

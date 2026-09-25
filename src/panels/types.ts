@@ -6,6 +6,7 @@ export enum PanelType {
   MetadataDetail = 'metadataDetail',
   TableOverview = 'tableOverview',
   ConnectionDashboard = 'connectionDashboard',
+  SchemaOverview = 'schemaOverview',
   MetadataArchitecture = 'metadataArchitecture',
   ManifestList = 'manifestList',
   ManifestFile = 'manifestFile',

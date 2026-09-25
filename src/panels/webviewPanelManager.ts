@@ -26,6 +26,7 @@ import { getManifestFileHtml } from './html/manifestFile.js';
 import { getParquetPreviewHtml } from './html/parquetPreview.js';
 import { getAdHocQueryHtml } from './html/adHocQuery.js';
 import { getTableOverviewHtml } from './html/tableOverview.js';
+import { getSchemaOverviewHtml } from './html/schemaOverview.js';
 import { getConnectionDashboardHtml } from './html/connectionDashboard.js';
 import { getMetadataArchitectureHtml } from './html/metadataArchitecture.js';
 import type {
@@ -33,6 +34,7 @@ import type {
   TablePartitionField,
   SnapshotSummaryItem,
   DiscoveredTableItem,
+  DiscoveredSchemaItem,
   ManifestArchitectureCard,
   ManifestDataFileEntry,
 } from './messages.js';
@@ -1361,11 +1363,10 @@ export class WebviewPanelManager {
     } else if (segmentIndex === 1) {
       // Schema container segment
       const schemaName = breadcrumbs[1];
-      const config = this._getConnectionConfig(handle, targetPath);
-      if (config && handle) {
-        await this.openConnectionDashboardPanel(config, handle, effectiveAdapter, schemaName);
+      if (handle) {
+        await this.openSchemaOverviewPanel(targetPath, handle, effectiveAdapter, schemaName);
       } else {
-        void vscode.commands.executeCommand('icebergExplorer.openConnectionDashboard', undefined, schemaName);
+        void vscode.commands.executeCommand('icebergExplorer.openSchemaOverview', targetPath, schemaName);
       }
     } else {
       // Fallback: check if target is a table
@@ -1527,6 +1528,9 @@ export class WebviewPanelManager {
           case 'openTableOverview':
             void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
             break;
+          case 'openSchemaOverview':
+            void this.openSchemaOverviewPanel(msg.schemaPath, handle, effectiveAdapter, msg.schemaName);
+            break;
           case 'editConnection':
             void vscode.commands.executeCommand('icebergExplorer.openSettings', config.id);
             break;
@@ -1538,6 +1542,86 @@ export class WebviewPanelManager {
 
     this.logger.info(`Panel opened: type=connectionDashboard resource=${config.id}`);
     await this.loadConnectionDashboard(gate, config, handle, effectiveAdapter, initialFilter);
+  }
+
+  /**
+   * Open or reveal the Schema Overview panel.
+   */
+  async openSchemaOverviewPanel(
+    schemaPath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+    schemaName?: string,
+  ): Promise<vscode.WebviewPanel> {
+    const key = panelRegistryKey(PanelType.SchemaOverview, schemaPath);
+    const existing = this.registry.get(key);
+    if (existing) {
+      this.logger.info(`Panel revealed (already open): type=schemaOverview resource=${schemaPath}`);
+      existing.panel.reveal();
+      return existing.panel;
+    }
+
+    const displayName = schemaName ?? lastPathSegment(schemaPath);
+    const nonce = generateNonce();
+    const panel = vscode.window.createWebviewPanel(
+      PanelType.SchemaOverview,
+      `${displayName} — Schema`,
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
+    );
+
+    const effectiveAdapter = adapter ?? this.storageAdapter;
+    const gate = new WebviewReadyGate(panel, this.logger, 'schemaOverview');
+    panel.webview.html = getSchemaOverviewHtml(nonce, panel.webview.cspSource, schemaPath);
+
+    const record: PanelRecord = { panel, resourcePath: schemaPath, handle, adapter: effectiveAdapter, gate };
+    this.registry.set(key, record);
+    this.tempFiles.set(key, null);
+
+    panel.onDidDispose(
+      () => this.onPanelDispose(key),
+      undefined,
+      this.context.subscriptions,
+    );
+
+    panel.webview.onDidReceiveMessage(
+      async (msg: WebviewMessage) => {
+        if (!msg?.type) { return; }
+        if (gate.onHostMessage(msg)) { return; }
+
+        switch (msg.type) {
+          case 'retry':
+            void this.loadSchemaOverview(gate, schemaPath, handle, effectiveAdapter, schemaName);
+            break;
+          case 'breadcrumbNavigate':
+            void this._handleBreadcrumbNavigate(schemaPath, msg.segment, handle, effectiveAdapter);
+            break;
+          case 'openConnectionDashboard': {
+            const config = this._getConnectionConfig(handle, schemaPath);
+            if (config) {
+              void this.openConnectionDashboardPanel(config, handle, effectiveAdapter);
+            }
+            break;
+          }
+          case 'openTableOverview':
+            void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+          case 'openAdHocQuery':
+            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
+        }
+      },
+      undefined,
+      this.context.subscriptions,
+    );
+
+    this.logger.info(`Panel opened: type=schemaOverview resource=${schemaPath}`);
+    await this.loadSchemaOverview(gate, schemaPath, handle, effectiveAdapter, schemaName);
+    return panel;
   }
 
   /**
@@ -1907,8 +1991,31 @@ export class WebviewPanelManager {
       }
     };
 
+    const schemas: DiscoveredSchemaItem[] = [];
+
     for (const s of schemasResult) {
-      await exploreDirectory(s, undefined, 0);
+      const isTab = await adapter.isTable(handle, s);
+      if (isTab === true) {
+        tables.push({
+          name: lastPathSegment(s),
+          path: s,
+          schema: 'default',
+        });
+      } else {
+        const initialTableCount = tables.length;
+        const schemaName = lastPathSegment(s);
+        const subEntries = await adapter.listTables(handle, s);
+        if (!isStorageError(subEntries)) {
+          for (const child of subEntries) {
+            await exploreDirectory(child, schemaName, 1);
+          }
+        }
+        schemas.push({
+          name: schemaName,
+          path: s,
+          tableCount: tables.length - initialTableCount,
+        });
+      }
     }
 
     gate.post({
@@ -1918,7 +2025,82 @@ export class WebviewPanelManager {
       warehousePath: config.warehousePath,
       region: config.region,
       endpointUrl: config.endpointUrl,
-      schemasCount: schemasResult.length,
+      schemasCount: schemas.length,
+      tablesCount: tables.length,
+      schemas,
+      tables,
+      initialFilter: initialFilter ?? '',
+    });
+  }
+
+  private async loadSchemaOverview(
+    gate: WebviewReadyGate,
+    schemaPath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+    schemaNameHint?: string,
+    initialFilter?: string,
+  ): Promise<void> {
+    gate.post({ type: 'setState', state: 'loading' });
+
+    const displaySchemaName = schemaNameHint ?? lastPathSegment(schemaPath);
+    const tables: DiscoveredTableItem[] = [];
+
+    const exploreDirectory = async (
+      dirPath: string,
+      parentNamespace?: string,
+      depth = 0,
+    ): Promise<void> => {
+      if (depth > 3) return;
+
+      const isTab = await adapter.isTable(handle, dirPath);
+      if (isTab === true) {
+        tables.push({
+          name: lastPathSegment(dirPath),
+          path: dirPath,
+          schema: parentNamespace ?? displaySchemaName,
+        });
+        return;
+      }
+
+      const nsName = lastPathSegment(dirPath);
+      const currentNamespace = parentNamespace ? `${parentNamespace}.${nsName}` : nsName;
+
+      const subEntries = await adapter.listTables(handle, dirPath);
+      if (!isStorageError(subEntries)) {
+        for (const child of subEntries) {
+          await exploreDirectory(child, currentNamespace, depth + 1);
+        }
+      }
+    };
+
+    const isDirectTable = await adapter.isTable(handle, schemaPath);
+    if (isDirectTable === true) {
+      tables.push({
+        name: lastPathSegment(schemaPath),
+        path: schemaPath,
+        schema: displaySchemaName,
+      });
+    } else {
+      const entries = await adapter.listTables(handle, schemaPath);
+      if (isStorageError(entries)) {
+        const msg = ERROR_MESSAGES[entries.class] ?? ERROR_MESSAGES['internal'];
+        gate.post({ type: 'setState', state: 'error', errorClass: entries.class, message: msg });
+        return;
+      }
+      for (const child of entries) {
+        await exploreDirectory(child, displaySchemaName, 1);
+      }
+    }
+
+    const config = this._getConnectionConfig(handle, schemaPath);
+
+    gate.post({
+      type: 'loadSchemaOverview',
+      schemaName: displaySchemaName,
+      schemaPath,
+      warehouseLabel: config?.label,
+      warehousePath: config?.warehousePath ?? handle.warehousePath,
       tablesCount: tables.length,
       tables,
       initialFilter: initialFilter ?? '',

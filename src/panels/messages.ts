@@ -114,6 +114,12 @@ export interface DiscoveredTableItem {
   schema: string;
 }
 
+export interface DiscoveredSchemaItem {
+  name: string;
+  path: string;
+  tableCount: number;
+}
+
 export interface LoadConnectionDashboardMessage {
   type: 'loadConnectionDashboard';
   connectionLabel: string;
@@ -122,6 +128,18 @@ export interface LoadConnectionDashboardMessage {
   region?: string;
   endpointUrl?: string;
   schemasCount: number;
+  tablesCount: number;
+  schemas?: DiscoveredSchemaItem[];
+  tables: DiscoveredTableItem[];
+  initialFilter?: string;
+}
+
+export interface LoadSchemaOverviewMessage {
+  type: 'loadSchemaOverview';
+  schemaName: string;
+  schemaPath: string;
+  warehouseLabel?: string;
+  warehousePath?: string;
   tablesCount: number;
   tables: DiscoveredTableItem[];
   initialFilter?: string;
@@ -179,6 +197,7 @@ export type PanelMessage =
   | LoadQueryResultMessage
   | ShowCapBannerMessage
   | LoadTableOverviewMessage
+  | LoadSchemaOverviewMessage
   | LoadDataPreviewMessage
   | LoadConnectionDashboardMessage
   | LoadMetadataArchitectureMessage
@@ -236,6 +255,12 @@ export interface OpenTableOverviewMessage {
   resourcePath: string;
 }
 
+export interface OpenSchemaOverviewMessage {
+  type: 'openSchemaOverview';
+  schemaPath: string;
+  schemaName?: string;
+}
+
 export interface OpenMetadataPanelMessage {
   type: 'openMetadataPanel';
   resourcePath: string;
@@ -248,7 +273,7 @@ export interface OpenMetadataArchitectureMessage {
 
 export interface OpenConnectionDashboardMessage {
   type: 'openConnectionDashboard';
-  connectionId: string;
+  connectionId?: string;
 }
 
 export interface FetchDataPreviewMessage {
@@ -278,6 +303,7 @@ export type WebviewMessage =
   | RunQueryMessage
   | CancelQueryMessage
   | OpenTableOverviewMessage
+  | OpenSchemaOverviewMessage
   | OpenMetadataPanelMessage
   | OpenMetadataArchitectureMessage
   | OpenConnectionDashboardMessage

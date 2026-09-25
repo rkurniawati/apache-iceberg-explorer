@@ -100,6 +100,23 @@ export function registerTreeCommands(
     ),
   );
 
+  // ── icebergExplorer.openSchemaOverview ──────────────────────────────────
+  // Arguments: [schemaPath: string, schemaName?: string]
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.openSchemaOverview',
+      async (schemaPath: string, schemaName?: string) => {
+        logger.info(`openSchemaOverview command: path=${schemaPath} name=${schemaName}`);
+        const handle = provider.getActiveHandle();
+        if (!handle) {
+          logger.warn('openSchemaOverview: no active connection handle — ignoring');
+          return;
+        }
+        void panelManager.openSchemaOverviewPanel(schemaPath, handle, provider.getStorageAdapter(), schemaName);
+      },
+    ),
+  );
+
   // ── icebergExplorer.openConnectionDashboard ──────────────────────────────
   // Arguments: [id?: string, initialFilter?: string]
   context.subscriptions.push(

@@ -272,23 +272,23 @@ export function getConnectionDashboardHtml(
       </div>
     </div>
 
-    <!-- Tables Roster -->
+    <!-- Schemas Roster -->
     <div class="roster-header">
-      <div class="roster-title">Discovered Tables (<span id="tables-count">0</span>)</div>
-      <input type="text" class="search-input" id="table-search" placeholder="Search tables or schemas…">
+      <div class="roster-title">Schemas (<span id="schemas-count">0</span>)</div>
+      <input type="text" class="search-input" id="schema-search" placeholder="Search schemas…">
     </div>
 
     <div style="overflow-x: auto;">
-      <table id="tables-table">
+      <table id="schemas-table">
         <thead>
           <tr>
-            <th style="width: 250px;">Namespace</th>
-            <th>Table Name</th>
+            <th style="width: 260px;">Schema / Namespace</th>
             <th>Location URI</th>
-            <th style="width: 200px;">Actions</th>
+            <th style="width: 140px;">Tables</th>
+            <th style="width: 160px;">Actions</th>
           </tr>
         </thead>
-        <tbody id="tables-tbody"></tbody>
+        <tbody id="schemas-tbody"></tbody>
       </table>
     </div>
   </div>
@@ -298,7 +298,7 @@ export function getConnectionDashboardHtml(
     vscode.postMessage({ type: 'webviewReady' });
 
     let currentDashboard = null;
-    let allTables = [];
+    let allSchemas = [];
 
     document.getElementById('retry-btn')?.addEventListener('click', () => {
       vscode.postMessage({ type: 'retry' });
@@ -316,46 +316,45 @@ export function getConnectionDashboardHtml(
       vscode.postMessage({ type: 'editConnection', connectionId: currentDashboard?.connectionId });
     });
 
-    document.getElementById('table-search')?.addEventListener('input', (e) => {
+    document.getElementById('schema-search')?.addEventListener('input', (e) => {
       const q = e.target.value.toLowerCase();
-      renderTables(allTables.filter(t => t.name.toLowerCase().includes(q) || t.schema.toLowerCase().includes(q)));
+      renderSchemas(allSchemas.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.path && s.path.toLowerCase().includes(q))));
     });
 
-    function renderTables(tables) {
-      const countEl = document.getElementById('tables-count');
+    function renderSchemas(schemas) {
+      const countEl = document.getElementById('schemas-count');
       if (countEl) {
-        countEl.textContent = tables.length;
+        countEl.textContent = schemas.length;
       }
-      const tbody = document.getElementById('tables-tbody');
+      const tbody = document.getElementById('schemas-tbody');
       tbody.innerHTML = '';
-      if (tables.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--vscode-descriptionForeground); padding: 2rem;">No tables found</td></tr>';
+      if (schemas.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--vscode-descriptionForeground); padding: 2rem;">No schemas found</td></tr>';
         return;
       }
 
-      tables.forEach((t) => {
+      schemas.forEach((s) => {
         const tr = document.createElement('tr');
         tr.innerHTML = \`
-          <td><code style="color: var(--vscode-symbolIcon-classForeground, #4ec9b0);">\${esc(t.schema)}</code></td>
-          <td><button class="table-link" data-action="overview" data-path="\${esc(t.path)}" title="Open table overview">\${esc(t.name)}</button></td>
-          <td style="font-family: monospace; font-size: 0.85rem; color: var(--vscode-descriptionForeground);">\${esc(t.path)}</td>
+          <td><button class="table-link" data-action="open-schema" data-path="\${esc(s.path)}" data-name="\${esc(s.name)}" title="Open schema overview"><code style="color: var(--vscode-symbolIcon-classForeground, #4ec9b0); font-family: inherit; font-size: inherit;">\${esc(s.name)}</code></button></td>
+          <td style="font-family: monospace; font-size: 0.85rem; color: var(--vscode-descriptionForeground);">\${esc(s.path)}</td>
+          <td>\${s.tableCount} table\${s.tableCount === 1 ? '' : 's'}</td>
           <td>
-            <button class="action-link" data-action="query" data-path="\${esc(t.path)}">Query SQL</button>
+            <button class="action-link" data-action="open-schema" data-path="\${esc(s.path)}" data-name="\${esc(s.name)}">View Tables</button>
           </td>
         \`;
         tbody.appendChild(tr);
       });
     }
 
-    document.getElementById('tables-tbody')?.addEventListener('click', (e) => {
+    document.getElementById('schemas-tbody')?.addEventListener('click', (e) => {
       const target = e.target.closest('[data-action]');
       if (target) {
         const action = target.getAttribute('data-action');
         const path = target.getAttribute('data-path');
-        if (action === 'overview' && path) {
-          vscode.postMessage({ type: 'openTableOverview', resourcePath: path });
-        } else if (action === 'query' && path) {
-          vscode.postMessage({ type: 'openAdHocQuery', resourcePath: path });
+        const name = target.getAttribute('data-name');
+        if (action === 'open-schema' && path) {
+          vscode.postMessage({ type: 'openSchemaOverview', schemaPath: path, schemaName: name });
         }
       }
     });
@@ -401,29 +400,29 @@ export function getConnectionDashboardHtml(
         document.getElementById('stat-schemas').textContent = msg.schemasCount;
         document.getElementById('stat-tables').textContent = msg.tablesCount;
 
-        allTables = msg.tables || [];
-        const searchInput = document.getElementById('table-search');
+        allSchemas = msg.schemas || [];
+        const searchInput = document.getElementById('schema-search');
         const filterVal = msg.initialFilter || '';
         if (searchInput) {
           searchInput.value = filterVal;
         }
         const q = filterVal.toLowerCase();
         if (q) {
-          renderTables(allTables.filter(t => (t.name && t.name.toLowerCase().includes(q)) || (t.schema && t.schema.toLowerCase().includes(q))));
+          renderSchemas(allSchemas.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.path && s.path.toLowerCase().includes(q))));
         } else {
-          renderTables(allTables);
+          renderSchemas(allSchemas);
         }
       } else if (msg.type === 'setFilter') {
-        const searchInput = document.getElementById('table-search');
+        const searchInput = document.getElementById('schema-search');
         const filterVal = msg.filter || '';
         if (searchInput) {
           searchInput.value = filterVal;
         }
         const q = filterVal.toLowerCase();
         if (q) {
-          renderTables(allTables.filter(t => (t.name && t.name.toLowerCase().includes(q)) || (t.schema && t.schema.toLowerCase().includes(q))));
+          renderSchemas(allSchemas.filter(s => (s.name && s.name.toLowerCase().includes(q)) || (s.path && s.path.toLowerCase().includes(q))));
         } else {
-          renderTables(allTables);
+          renderSchemas(allSchemas);
         }
       }
     });
