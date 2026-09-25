@@ -48,8 +48,9 @@ You can also launch it from the sidebar: click the **Run and Debug** icon (`Cmd+
 **What you will see** in the Extension Development Host window:
 
 - Open the Explorer sidebar (`Cmd+Shift+E`)
-- Scroll to the bottom — the **Iceberg Explorer** panel appears with a placeholder:
-  > *Not configured — click ⚙ to configure*
+- Scroll to the bottom — the **Iceberg Explorer** panel appears with a welcome view:
+  > *No Iceberg connections configured.*
+  > Includes an **Add Connection** button and a `+` icon in the view header.
 
 The settings webview and tree view are implemented in a later slice. The Connection Manager and Storage Layer backends are active and ready.
 

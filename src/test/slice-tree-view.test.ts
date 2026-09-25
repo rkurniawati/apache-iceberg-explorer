@@ -165,20 +165,13 @@ async function run(name: string, fn: () => Promise<void> | void): Promise<void> 
 
 void (async () => {
 
-  // ── New Test: Root with no connections → placeholder ─────────────────────
-  await run('Root with no connections → single "No connections" placeholder item', () => {
+  // ── Root with no connections → empty array (triggers viewsWelcome) ───────────
+  await run('Root with no connections → empty array', () => {
     const provider = makeProvider();
     // No setConnections call — configs is [] by default
     const children = provider.getChildren(undefined);
     const items = Array.isArray(children) ? children : [];
-    assert.strictEqual(items.length, 1);
-    const firstItem = items[0] as IcebergTreeItem | undefined;
-    assert.ok(firstItem, 'expected at least one item');
-    const label = firstItem.label ?? '';
-    assert.ok(
-      label.toString().includes('No connections'),
-      `Expected label to contain "No connections", got: ${label}`,
-    );
+    assert.strictEqual(items.length, 0, `expected 0 items so viewsWelcome is shown, got ${items.length}`);
   });
 
   // ── New Test: Root with two connections → two connection nodes ─────────────
@@ -246,32 +239,23 @@ void (async () => {
     assert.deepStrictEqual(firstCmd.arguments, ['conn-1']);
   });
 
-  // ── New Test: setConnections([]) after active connection → placeholder ─────
-  await run('setConnections([]) removes all nodes and shows placeholder', () => {
+  // ── New Test: setConnections([]) after active connection → empty array ─────
+  await run('setConnections([]) removes all nodes and returns empty array', () => {
     const provider = makeProvider();
     provider.setConnections([conn1]);
     // Then remove all connections
     provider.setConnections([]);
     const items = provider.getChildren(undefined) as IcebergTreeItem[];
-    assert.strictEqual(items.length, 1);
-    const label = String(items[0].label ?? '');
-    assert.ok(label.includes('No connections'), `Expected placeholder, got: ${label}`);
+    assert.strictEqual(items.length, 0, `expected 0 items so viewsWelcome is shown, got ${items.length}`);
   });
 
   // ── Test 1 (updated): No active connection ────────────────────────────────
-  await run('No active connection (empty configs) → getChildren(undefined) returns placeholder item', () => {
+  await run('No active connection (empty configs) → getChildren(undefined) returns empty array', () => {
     const provider = makeProvider();
     // No setConnections call — handle is null, configs is [] by default
     const children = provider.getChildren(undefined);
     const items = Array.isArray(children) ? children : [];
-    assert.strictEqual(items.length, 1);
-    const firstItem = items[0] as IcebergTreeItem | undefined;
-    assert.ok(firstItem, 'expected at least one item');
-    const label1 = firstItem.label ?? '';
-    assert.ok(
-      label1.toString().includes('No connections'),
-      `Expected label to contain "No connections", got: ${label1}`,
-    );
+    assert.strictEqual(items.length, 0, `expected 0 items, got ${items.length}`);
   });
 
   // ── Test 2: Root children success ────────────────────────────────────────

@@ -212,17 +212,8 @@ export class IcebergTreeProvider
     // ── Root level ────────────────────────────────────────────────────────────
     if (element === undefined) {
       if (this.configs.length === 0) {
-        // No connections saved — show placeholder
-        const item = new IcebergTreeItem(
-          'No connections \u2014 click \u2699 to add one',
-          'loading',
-          '__not-configured__',
-        );
-        item.command = {
-          command: 'icebergExplorer.openSettings',
-          title: 'Add connection',
-        };
-        return [item];
+        // No connections saved — return empty list so VS Code displays viewsWelcome
+        return [];
       }
       // One node per saved connection
       return this.configs.map((cfg) =>

@@ -28,8 +28,9 @@
     "commands": [
       {
         "command": "icebergExplorer.openSettings",
-        "title": "Configure Iceberg Explorer connection",
-        "icon": "$(settings-gear)"
+        "title": "Add Connection",
+        "category": "Iceberg Explorer",
+        "icon": "$(plus)"
       },
       {
         "command": "icebergExplorer.testPanel",
@@ -92,6 +93,11 @@
         "view": "icebergExplorer",
         "contents": "Loading Iceberg Explorer...",
         "when": "!icebergExplorer.initialized"
+      },
+      {
+        "view": "icebergExplorer",
+        "contents": "No Iceberg connections configured.\n[Add Connection](command:icebergExplorer.openSettings)\n\nConfigure a connection to local or S3-compatible Iceberg tables.",
+        "when": "icebergExplorer.initialized"
       }
     ]
   },
