@@ -138,6 +138,19 @@ export function getMetadataArchitectureHtml(
     }
     button.btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+    .action-link {
+      background: var(--vscode-button-secondaryBackground, #3a3d41);
+      color: var(--vscode-button-secondaryForeground, #fff);
+      border: 1px solid var(--vscode-button-border, transparent);
+      padding: 0.2rem 0.55rem;
+      border-radius: 2px;
+      cursor: pointer;
+      font-size: 0.78rem;
+    }
+    .action-link:hover {
+      background: var(--vscode-button-secondaryHoverBackground, #45494e);
+    }
+
     /* ── DAG Tree Architecture Layout ──────────────────────────────────── */
     .dag-container {
       display: flex;
@@ -355,6 +368,16 @@ export function getMetadataArchitectureHtml(
       }
     });
 
+    document.getElementById('breadcrumb')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.breadcrumb-link');
+      if (btn) {
+        vscode.postMessage({
+          type: 'breadcrumbNavigate',
+          segment: Number(btn.dataset.idx),
+        });
+      }
+    });
+
     // Pagination
     document.getElementById('page-prev-btn')?.addEventListener('click', () => {
       if (timelinePage > 0) {
@@ -477,6 +500,15 @@ export function getMetadataArchitectureHtml(
             vscode.postMessage({ type: 'fetchManifestDataFiles', manifestPath: path });
           }
         }
+        return;
+      }
+
+      const previewBtn = e.target.closest('.preview-btn');
+      if (previewBtn) {
+        const resourcePath = previewBtn.getAttribute('data-path');
+        if (resourcePath) {
+          vscode.postMessage({ type: 'openParquetPreview', resourcePath });
+        }
       }
     });
 
@@ -566,7 +598,7 @@ export function getMetadataArchitectureHtml(
                       <td>\${f.recordCount}</td>
                       <td style="color: var(--vscode-descriptionForeground);">\${sizeKb}</td>
                       <td>
-                        \${isParquet ? \`<button class="action-link" onclick="vscode.postMessage({ type: 'openParquetPreview', resourcePath: '\${esc(f.path)}' })">Preview</button>\` : '—'}
+                        \${isParquet ? \`<button class=\"action-link preview-btn\" data-path=\"\${esc(f.path)}\"\>Preview\</button\>\` : '—'}
                       </td>
                     </tr>
                   \`;

@@ -352,6 +352,36 @@ async function runTests() {
     assert.strictEqual(manifestFilesMsg.files[0].status, 'ADDED');
   });
 
+  await test('Metadata Architecture DAG: HTML does not contain inline onclick handlers (CSP compliant)', () => {
+    const html = getMetadataArchitectureHtml('test-nonce', 'vscode-resource:', 's3://warehouse/db/events');
+    assert.ok(!html.includes('onclick='), 'No inline onclick handler in HTML');
+    assert.ok(html.includes('preview-btn'), 'Includes preview-btn class for delegated preview click handling');
+    assert.ok(html.includes("'openParquetPreview'"), 'Includes openParquetPreview event posting');
+  });
+
+  await test('Metadata Architecture DAG: openParquetPreview message opens parquet preview panel', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const qe = makeQueryEngine();
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    let openedResource: string | undefined;
+    (manager as any).openParquetPreviewPanel = async (res: string) => {
+      openedResource = res;
+    };
+
+    await manager.openMetadataArchitecturePanel('s3://warehouse/db/events', handle, adapter);
+    const key = panelRegistryKey(PanelType.MetadataArchitecture, 's3://warehouse/db/events');
+    const record = (manager as any).registry.get(key);
+
+    (record.panel.webview as any)._receiveMessage({
+      type: 'openParquetPreview',
+      resourcePath: 's3://warehouse/db/events/data/file1.parquet',
+    });
+
+    assert.strictEqual(openedResource, 's3://warehouse/db/events/data/file1.parquet');
+  });
+
   // ─── Ad-hoc Query Table Path Resolution ──────────────────────────────────
 
   await test('Ad-hoc query panel: queries Iceberg table path by resolving active parquet data files', async () => {
