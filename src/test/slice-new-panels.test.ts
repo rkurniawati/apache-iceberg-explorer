@@ -949,6 +949,64 @@ async function runTests() {
     assert.ok(dashRecord, 'Connection Dashboard opened from Schema Overview breadcrumb');
   });
 
+  await test('Webview link: clicking table link in Schema Overview reveals table in tree view', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      (p) => { revealedPath = p; },
+    );
+
+    const schemaPanel = await manager.openSchemaOverviewPanel('s3://warehouse/db', handle, adapter, 'db');
+    assert.strictEqual(revealedPath, 's3://warehouse/db');
+
+    // Simulate clicking a table link in Schema Overview
+    (schemaPanel.webview as any)._receiveMessage({ type: 'openTableOverview', resourcePath: 's3://warehouse/db/events' });
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(revealedPath, 's3://warehouse/db/events');
+    const tableKey = panelRegistryKey(PanelType.TableOverview, 's3://warehouse/db/events');
+    const tableRecord = (manager as any).registry.get(tableKey);
+    assert.ok(tableRecord, 'Table overview opened from schema panel table link');
+  });
+
+  await test('Webview link: clicking schema card in Connection Dashboard reveals schema in tree view', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      undefined,
+      (p) => { revealedPath = p; },
+      () => [{ id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 }],
+    );
+
+    await manager.openConnectionDashboardPanel(
+      { id: 'conn-1', label: 'My Warehouse', connectionType: 's3', warehousePath: 's3://warehouse', sslVerification: true, savedAt: 1000 },
+      handle,
+      adapter,
+    );
+    assert.strictEqual(revealedPath, 's3://warehouse');
+
+    const dashKey = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-1');
+    const dashRecord = (manager as any).registry.get(dashKey);
+
+    // Simulate clicking a schema card
+    (dashRecord.panel.webview as any)._receiveMessage({ type: 'openSchemaOverview', schemaPath: 's3://warehouse/db', schemaName: 'db' });
+    await new Promise((r) => setTimeout(r, 50));
+
+    assert.strictEqual(revealedPath, 's3://warehouse/db');
+    const schemaKey = panelRegistryKey(PanelType.SchemaOverview, 's3://warehouse/db');
+    const schemaRecord = (manager as any).registry.get(schemaKey);
+    assert.ok(schemaRecord, 'Schema overview opened from dashboard schema card');
+  });
+
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
   if (failed > 0) {
     process.exit(1);

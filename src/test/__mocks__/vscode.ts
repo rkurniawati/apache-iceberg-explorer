@@ -118,6 +118,9 @@ export const window = {
         _getMessages() { return messages; },
       },
       reveal(_col: unknown) {},
+      onDidChangeViewState(_handler: (e: { webviewPanel: { active: boolean } }) => void) {
+        return { dispose() {} };
+      },
       onDidDispose(handler: () => void, _ctx: unknown, _subs: unknown) {
         disposeListeners.push(handler);
         return { dispose() {} };

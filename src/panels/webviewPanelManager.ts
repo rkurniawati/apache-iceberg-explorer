@@ -202,6 +202,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(resourcePath);
+    }
     const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.MetadataDetail, resourcePath);
     const existing = this.registry.get(key);
@@ -247,6 +250,18 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(resourcePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
+
     panel.webview.onDidReceiveMessage(
       (msg: WebviewMessage) => this.handleMetadataWebviewMessage(msg, key, handle),
       undefined,
@@ -288,6 +303,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(resourcePath);
+    }
     const key = panelRegistryKey(PanelType.ManifestList, resourcePath);
     const existing = this.registry.get(key);
 
@@ -318,6 +336,18 @@ export class WebviewPanelManager {
     this.tempFiles.set(key, null);
 
     panel.onDidDispose(() => this.onPanelDispose(key), undefined, this.context.subscriptions);
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(resourcePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       (msg: WebviewMessage) => {
@@ -393,6 +423,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(resourcePath);
+    }
     const key = panelRegistryKey(PanelType.ManifestFile, resourcePath);
     const existing = this.registry.get(key);
 
@@ -423,6 +456,18 @@ export class WebviewPanelManager {
     this.tempFiles.set(key, null);
 
     panel.onDidDispose(() => this.onPanelDispose(key), undefined, this.context.subscriptions);
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(resourcePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       (msg: WebviewMessage) => {
@@ -494,6 +539,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(resourcePath);
+    }
     const key = panelRegistryKey(PanelType.ParquetPreview, resourcePath);
     const existing = this.registry.get(key);
 
@@ -524,6 +572,18 @@ export class WebviewPanelManager {
     this.tempFiles.set(key, null);
 
     panel.onDidDispose(() => this.onPanelDispose(key), undefined, this.context.subscriptions);
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(resourcePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       (msg: WebviewMessage) => {
@@ -605,6 +665,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(resourcePath);
+    }
     const key = panelRegistryKey(PanelType.AdHocQuery, resourcePath);
     const existing = this.registry.get(key);
 
@@ -634,6 +697,18 @@ export class WebviewPanelManager {
     this.tempFiles.set(key, null);
 
     panel.onDidDispose(() => this.onPanelDispose(key), undefined, this.context.subscriptions);
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(resourcePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     let queryInFlight = false;
 
@@ -1399,6 +1474,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(tablePath);
+    }
     const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.TableOverview, tablePath);
     const existing = this.registry.get(key);
@@ -1433,6 +1511,18 @@ export class WebviewPanelManager {
       undefined,
       this.context.subscriptions,
     );
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(tablePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       async (msg: WebviewMessage) => {
@@ -1477,6 +1567,9 @@ export class WebviewPanelManager {
     adapter?: StorageAdapter,
     initialFilter?: string,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(config.warehousePath || config.id);
+    }
     const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.ConnectionDashboard, config.id);
     const existing = this.registry.get(key);
@@ -1512,6 +1605,18 @@ export class WebviewPanelManager {
       undefined,
       this.context.subscriptions,
     );
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(config.warehousePath || config.id);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       async (msg: WebviewMessage | { type: 'editConnection'; connectionId?: string }) => {
@@ -1553,6 +1658,9 @@ export class WebviewPanelManager {
     adapter: StorageAdapter,
     schemaName?: string,
   ): Promise<vscode.WebviewPanel> {
+    if (this.revealPath) {
+      void this.revealPath(schemaPath);
+    }
     const key = panelRegistryKey(PanelType.SchemaOverview, schemaPath);
     const existing = this.registry.get(key);
     if (existing) {
@@ -1587,6 +1695,18 @@ export class WebviewPanelManager {
       undefined,
       this.context.subscriptions,
     );
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(schemaPath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       async (msg: WebviewMessage) => {
@@ -1632,6 +1752,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
   ): Promise<void> {
+    if (this.revealPath) {
+      void this.revealPath(tablePath);
+    }
     const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.MetadataArchitecture, tablePath);
     const existing = this.registry.get(key);
@@ -1666,6 +1789,18 @@ export class WebviewPanelManager {
       undefined,
       this.context.subscriptions,
     );
+
+    if (typeof panel.onDidChangeViewState === 'function') {
+      panel.onDidChangeViewState(
+        (e) => {
+          if (e.webviewPanel.active && this.revealPath) {
+            void this.revealPath(tablePath);
+          }
+        },
+        undefined,
+        this.context.subscriptions,
+      );
+    }
 
     panel.webview.onDidReceiveMessage(
       async (msg: WebviewMessage) => {
