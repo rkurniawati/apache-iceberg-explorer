@@ -64,13 +64,47 @@ export function getSettingsHtml(
       border-radius: 2px;
       font: inherit;
     }
-    input:focus, select:focus {
+    input:focus, select:focus, textarea:focus {
       outline: 1px solid var(--vscode-focusBorder);
       outline-offset: -1px;
     }
-    input:disabled, select:disabled {
+    input:disabled, select:disabled, textarea:disabled {
       opacity: 0.45;
       cursor: not-allowed;
+    }
+    textarea {
+      width: 100%;
+      padding: 0.35rem 0.5rem;
+      background: var(--vscode-input-background);
+      color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, var(--vscode-editorWidget-border));
+      border-radius: 2px;
+      font: inherit;
+      box-sizing: border-box;
+    }
+    .key-mode-tabs {
+      display: inline-flex;
+      gap: 2px;
+      background: var(--vscode-editorWidget-background, rgba(255,255,255,0.05));
+      padding: 2px;
+      border-radius: 3px;
+      border: 1px solid var(--vscode-editorWidget-border);
+    }
+    .key-mode-btn {
+      padding: 2px 10px;
+      font-size: 0.82em;
+      border: none;
+      background: transparent;
+      color: var(--vscode-foreground);
+      cursor: pointer;
+      border-radius: 2px;
+      opacity: 0.75;
+    }
+    .key-mode-btn.active {
+      background: var(--vscode-button-background);
+      color: var(--vscode-button-foreground);
+      font-weight: 600;
+      opacity: 1;
     }
 
     /* Toggle row */
@@ -145,6 +179,7 @@ export function getSettingsHtml(
     <select id="conn-type">
       <option value="local">Local file system</option>
       <option value="s3">S3 / S3-compatible</option>
+      <option value="gcs">Google Cloud Storage (GCS)</option>
     </select>
   </div>
 
@@ -155,7 +190,7 @@ export function getSettingsHtml(
     <div class="field-error" id="err-label"></div>
   </div>
 
-  <!-- Warehouse path (local) / S3 URI (S3) -->
+  <!-- Warehouse path (local) / S3 URI (S3) / GCS URI (GCS) -->
   <div class="field">
     <label for="warehouse-path" id="warehouse-path-label">Warehouse path</label>
     <input id="warehouse-path" type="text" placeholder="/absolute/path/to/warehouse" autocomplete="off">
@@ -198,6 +233,53 @@ export function getSettingsHtml(
     </div>
   </div>
 
+  <!-- GCS-only fields -->
+  <div id="gcs-fields" style="display:none;">
+    <div class="field">
+      <label for="gcs-auth-type">Authentication method</label>
+      <select id="gcs-auth-type">
+        <option value="adc">Application Default Credentials (ADC) / gcloud CLI</option>
+        <option value="serviceAccountKey">Service Account Key (JSON or file path)</option>
+      </select>
+    </div>
+    <div class="field" id="gcs-key-row" style="display:none;">
+      <p id="gcs-creds-note" class="creds-note" style="display:none;">
+        Existing service account key is saved. Enter a new value only to update credentials.
+      </p>
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+        <label style="margin: 0;">Service account key</label>
+        <div class="key-mode-tabs">
+          <button type="button" class="key-mode-btn active" id="key-mode-file">Key File (.json)</button>
+          <button type="button" class="key-mode-btn" id="key-mode-paste">Paste JSON</button>
+        </div>
+      </div>
+
+      <!-- File Mode -->
+      <div id="gcs-file-container">
+        <div style="display: flex; gap: 0.5rem;">
+          <input id="gcs-key-file" type="text" placeholder="/path/to/key.json or ~/key.json" autocomplete="off" style="flex: 1;">
+          <button class="secondary" id="browse-key-btn" type="button" style="white-space: nowrap;">Browse…</button>
+        </div>
+      </div>
+
+      <!-- Paste JSON Mode -->
+      <div id="gcs-json-container" style="display: none;">
+        <textarea id="gcs-key-json" rows="6" placeholder='Paste Google Cloud Service Account JSON:&#10;{&#10;  "type": "service_account",&#10;  "project_id": "...",&#10;  "private_key": "-----BEGIN PRIVATE KEY-----\n...",&#10;  "client_email": "..."&#10;}' spellcheck="false" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; resize: vertical;"></textarea>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 0.25rem;">
+          <span id="gcs-json-status" style="font-size: 0.85em; color: var(--vscode-descriptionForeground);"></span>
+          <button class="secondary" id="format-json-btn" type="button" style="font-size: 0.85em; padding: 0.2rem 0.6rem;">Format / Validate JSON</button>
+        </div>
+      </div>
+
+      <div class="field-error" id="err-gcs-key"></div>
+    </div>
+    <div class="field">
+      <label for="gcs-project-id">GCP Project ID (optional)</label>
+      <input id="gcs-project-id" type="text" placeholder="e.g. my-gcp-project" autocomplete="off">
+      <div class="field-error" id="err-gcs-project"></div>
+    </div>
+  </div>
+
   <div class="btn-row">
     <button class="primary" id="save-btn" type="button">Save &amp; Connect</button>
     <button class="secondary" id="clear-btn" type="button">Clear</button>
@@ -224,34 +306,185 @@ export function getSettingsHtml(
   const accessKey    = /** @type {HTMLInputElement}    */ (document.getElementById('access-key'));
   const secretKey    = /** @type {HTMLInputElement}    */ (document.getElementById('secret-key'));
   const sslVerify    = /** @type {HTMLInputElement}    */ (document.getElementById('ssl-verify'));
-  const connId       = /** @type {HTMLInputElement}    */ (document.getElementById('conn-id'));
-  const formHeading  = document.getElementById('form-heading');
-  const credsNote    = document.getElementById('creds-note');
-  const saveBtn      = document.getElementById('save-btn');
-  const clearBtn     = document.getElementById('clear-btn');
-  const statusBanner = document.getElementById('status-banner');
+  const gcsFields    = document.getElementById('gcs-fields');
+  const gcsAuthType    = /** @type {HTMLSelectElement}   */ (document.getElementById('gcs-auth-type'));
+  const gcsKeyRow      = document.getElementById('gcs-key-row');
+  const gcsKeyFile     = /** @type {HTMLInputElement}    */ (document.getElementById('gcs-key-file'));
+  const gcsKeyJson     = /** @type {HTMLTextAreaElement} */ (document.getElementById('gcs-key-json'));
+  const keyModeFileBtn = document.getElementById('key-mode-file');
+  const keyModePasteBtn= document.getElementById('key-mode-paste');
+  const gcsFileContainer = document.getElementById('gcs-file-container');
+  const gcsJsonContainer = document.getElementById('gcs-json-container');
+  const browseKeyBtn   = document.getElementById('browse-key-btn');
+  const formatJsonBtn  = document.getElementById('format-json-btn');
+  const gcsJsonStatus  = document.getElementById('gcs-json-status');
+  const gcsCredsNote   = document.getElementById('gcs-creds-note');
+  const gcsProjectId   = /** @type {HTMLInputElement}    */ (document.getElementById('gcs-project-id'));
+  const connId         = /** @type {HTMLInputElement}    */ (document.getElementById('conn-id'));
+  const formHeading    = document.getElementById('form-heading');
+  const credsNote      = document.getElementById('creds-note');
+  const saveBtn        = document.getElementById('save-btn');
+  const clearBtn       = document.getElementById('clear-btn');
+  const statusBanner   = document.getElementById('status-banner');
 
-  // ── Connection type switch (FR-2, FR-5) ─────────────────────────────────
-  function applyType() {
-    var isS3 = connType.value === 's3';
-    // Update placeholder and label for warehouse path
-    warehousePath.placeholder = isS3 ? 's3://bucket/warehouse-path' : '/absolute/path/to/warehouse';
-    if (pathLabel) pathLabel.textContent = isS3 ? 'Warehouse path (S3 URI)' : 'Warehouse path';
-    var pathNote = document.getElementById('warehouse-path-note');
-    if (pathNote) {
-      pathNote.style.display = isS3 ? 'block' : 'none';
-    }
-    // Disable S3 inputs when not in S3 mode (FR-5)
-    var inputs = s3Fields ? s3Fields.querySelectorAll('input, select') : [];
-    inputs.forEach(function(el) {
-      el.disabled = !isS3;
-    });
-    if (credsNote && !isS3) {
-      credsNote.style.display = 'none';
+  var gcsKeyMode = 'file'; // 'file' | 'paste'
+
+  function setGcsKeyMode(mode) {
+    gcsKeyMode = mode;
+    if (mode === 'file') {
+      if (keyModeFileBtn) keyModeFileBtn.classList.add('active');
+      if (keyModePasteBtn) keyModePasteBtn.classList.remove('active');
+      if (gcsFileContainer) gcsFileContainer.style.display = 'block';
+      if (gcsJsonContainer) gcsJsonContainer.style.display = 'none';
+    } else {
+      if (keyModeFileBtn) keyModeFileBtn.classList.remove('active');
+      if (keyModePasteBtn) keyModePasteBtn.classList.add('active');
+      if (gcsFileContainer) gcsFileContainer.style.display = 'none';
+      if (gcsJsonContainer) gcsJsonContainer.style.display = 'block';
     }
   }
 
+  if (keyModeFileBtn) keyModeFileBtn.addEventListener('click', function() { setGcsKeyMode('file'); });
+  if (keyModePasteBtn) keyModePasteBtn.addEventListener('click', function() { setGcsKeyMode('paste'); });
+
+  if (browseKeyBtn) {
+    browseKeyBtn.addEventListener('click', function () {
+      vscode.postMessage({ type: 'browseKeyFile' });
+    });
+  }
+
+  function getEffectiveGcsKey() {
+    if (gcsKeyMode === 'paste') {
+      return (gcsKeyJson ? gcsKeyJson.value.trim() : '') || (gcsKeyFile ? gcsKeyFile.value.trim() : '');
+    }
+    return (gcsKeyFile ? gcsKeyFile.value.trim() : '') || (gcsKeyJson ? gcsKeyJson.value.trim() : '');
+  }
+
+  function clearGcsKeyError() {
+    var el = document.getElementById('err-gcs-key');
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+  }
+
+  function formatOrValidateJson() {
+    if (!gcsKeyJson) return;
+    var raw = gcsKeyJson.value.trim();
+    if (!raw) {
+      if (gcsJsonStatus) gcsJsonStatus.textContent = '';
+      return;
+    }
+    if (raw.startsWith('\`\`\`')) {
+      raw = raw.replace(/^\`\`\`(?:json)?\s*/i, '').replace(/\s*\`\`\`$/, '').trim();
+    }
+    if ((raw.startsWith("'") && raw.endsWith("'")) || (raw.startsWith('"') && raw.endsWith('"'))) {
+      raw = raw.slice(1, -1).trim();
+    }
+    try {
+      var parsed = JSON.parse(raw);
+      gcsKeyJson.value = JSON.stringify(parsed, null, 2);
+      if (gcsJsonStatus) {
+        gcsJsonStatus.textContent = parsed.client_email ? '✓ Service Account: ' + parsed.client_email : '✓ Valid JSON';
+        gcsJsonStatus.style.color = 'var(--vscode-charts-green, #4ec9b0)';
+      }
+      clearGcsKeyError();
+    } catch (err) {
+      try {
+        var relaxed = raw.replace(/"private_key"\s*:\s*"([^"]*)"/gs, function(_m, keyVal) {
+          return '"private_key": "' + keyVal.replace(/\\r?\\n/g, '\\\\n') + '"';
+        });
+        var parsed2 = JSON.parse(relaxed);
+        gcsKeyJson.value = JSON.stringify(parsed2, null, 2);
+        if (gcsJsonStatus) {
+          gcsJsonStatus.textContent = parsed2.client_email ? '✓ Repaired & formatted for ' + parsed2.client_email : '✓ Valid JSON';
+          gcsJsonStatus.style.color = 'var(--vscode-charts-green, #4ec9b0)';
+        }
+        clearGcsKeyError();
+      } catch (err2) {
+        if (gcsJsonStatus) {
+          gcsJsonStatus.textContent = '⚠ ' + err.message;
+          gcsJsonStatus.style.color = 'var(--vscode-errorForeground)';
+        }
+      }
+    }
+  }
+  if (formatJsonBtn) formatJsonBtn.addEventListener('click', formatOrValidateJson);
+
+  // ── Connection type switch (FR-2, FR-5) ─────────────────────────────────
+  function applyGcsAuthType() {
+    var isGcs = connType.value === 'gcs';
+    var isKey = isGcs && gcsAuthType && gcsAuthType.value === 'serviceAccountKey';
+    if (gcsKeyRow) {
+      gcsKeyRow.style.display = isKey ? 'block' : 'none';
+    }
+    if (gcsKeyFile) {
+      gcsKeyFile.disabled = !isKey;
+    }
+    if (gcsKeyJson) {
+      gcsKeyJson.disabled = !isKey;
+    }
+    if (browseKeyBtn) {
+      browseKeyBtn.disabled = !isKey;
+    }
+  }
+
+  function applyType() {
+    var isS3 = connType.value === 's3';
+    var isGcs = connType.value === 'gcs';
+
+    // Update placeholder and label for warehouse path
+    if (isS3) {
+      warehousePath.placeholder = 's3://bucket/warehouse-path';
+      if (pathLabel) pathLabel.textContent = 'Warehouse path (S3 URI)';
+    } else if (isGcs) {
+      warehousePath.placeholder = 'gs://bucket/warehouse-path';
+      if (pathLabel) pathLabel.textContent = 'Warehouse path (GCS URI)';
+    } else {
+      warehousePath.placeholder = '/absolute/path/to/warehouse';
+      if (pathLabel) pathLabel.textContent = 'Warehouse path';
+    }
+
+    var pathNote = document.getElementById('warehouse-path-note');
+    if (pathNote) {
+      if (isS3) {
+        pathNote.innerHTML = 'Points to the warehouse root in the bucket. Iceberg Explorer expects schemas and tables directly under this path: <code>s3://warehouse-path/&lt;schema&gt;/&lt;table&gt;/</code> containing <code>metadata/</code> and <code>data/</code> subdirectories.';
+        pathNote.style.display = 'block';
+      } else if (isGcs) {
+        pathNote.innerHTML = 'Points to the warehouse root in the bucket. Iceberg Explorer expects schemas and tables directly under this path: <code>gs://warehouse-path/&lt;schema&gt;/&lt;table&gt;/</code> containing <code>metadata/</code> and <code>data/</code> subdirectories.';
+        pathNote.style.display = 'block';
+      } else {
+        pathNote.style.display = 'none';
+      }
+    }
+
+    // Toggle S3 fields
+    if (s3Fields) {
+      s3Fields.style.display = isS3 ? 'block' : 'none';
+      var s3Inputs = s3Fields.querySelectorAll('input, select');
+      s3Inputs.forEach(function(el) {
+        el.disabled = !isS3;
+      });
+    }
+    if (credsNote && !isS3) {
+      credsNote.style.display = 'none';
+    }
+
+    // Toggle GCS fields
+    if (gcsFields) {
+      gcsFields.style.display = isGcs ? 'block' : 'none';
+      var gcsInputs = gcsFields.querySelectorAll('input, select');
+      gcsInputs.forEach(function(el) {
+        el.disabled = !isGcs;
+      });
+    }
+    applyGcsAuthType();
+  }
+
   connType.addEventListener('change', applyType);
+  if (gcsAuthType) {
+    gcsAuthType.addEventListener('change', applyGcsAuthType);
+  }
   applyType(); // apply on load
 
   // ── Clear button ─────────────────────────────────────────────────────────
@@ -264,11 +497,19 @@ export function getSettingsHtml(
     accessKey.value    = '';
     secretKey.value    = '';
     sslVerify.checked  = true;
+    if (gcsAuthType) gcsAuthType.value = 'adc';
+    if (gcsKeyFile) gcsKeyFile.value = '';
+    if (gcsKeyJson) gcsKeyJson.value = '';
+    if (gcsJsonStatus) gcsJsonStatus.textContent = '';
+    setGcsKeyMode('file');
+    if (gcsProjectId) gcsProjectId.value = '';
+    if (gcsCredsNote) gcsCredsNote.style.display = 'none';
     if (formHeading) formHeading.textContent = 'New Connection';
     if (credsNote) {
       credsNote.textContent = '';
       credsNote.style.display = 'none';
     }
+    applyGcsAuthType();
     clearErrors();
     hideBanner();
   });
@@ -302,6 +543,7 @@ export function getSettingsHtml(
     hideBanner();
 
     var isS3  = connType.value === 's3';
+    var isGcs = connType.value === 'gcs';
     var label = connLabel.value.trim();
     var path  = warehousePath.value.trim();
     var valid = true;
@@ -320,13 +562,16 @@ export function getSettingsHtml(
       }
     }
     if (!path) {
-      showError('err-path', isS3 ? 'Warehouse path (S3 URI) is required.' : 'Warehouse path is required.');
+      showError('err-path', isS3 ? 'Warehouse path (S3 URI) is required.' : isGcs ? 'Warehouse path (GCS URI) is required.' : 'Warehouse path is required.');
       valid = false;
-    } else if (!isS3 && !path.startsWith('/')) {
+    } else if (!isS3 && !isGcs && !path.startsWith('/')) {
       showError('err-path', 'Warehouse path must be an absolute path (starting with /).');
       valid = false;
     } else if (isS3 && !new RegExp('^s3[an]?://[^/]+', 'i').test(path)) {
       showError('err-path', 'Warehouse path must be a valid S3 URI (e.g. s3://bucket/warehouse-path).');
+      valid = false;
+    } else if (isGcs && !new RegExp('^(?:gs|gcs)://[^/]+', 'i').test(path)) {
+      showError('err-path', 'Warehouse path must be a valid GCS URI (e.g. gs://bucket/warehouse-path).');
       valid = false;
     }
 
@@ -358,7 +603,19 @@ export function getSettingsHtml(
       }
     }
 
+    if (isGcs) {
+      if (gcsAuthType && gcsAuthType.value === 'serviceAccountKey') {
+        var keyVal = getEffectiveGcsKey();
+        if (!keyVal) {
+          showError('err-gcs-key', 'Service account key JSON or file path is required.');
+          valid = false;
+        }
+      }
+    }
+
     if (!valid) return;
+
+    var gcsSecret = isGcs && gcsAuthType && gcsAuthType.value === 'serviceAccountKey' ? getEffectiveGcsKey() : undefined;
 
     // Send to extension host — credentials travel only in this message and are
     // immediately stored in SecretStorage by ConnectionManager (FR-3, NFR-7).
@@ -371,13 +628,13 @@ export function getSettingsHtml(
       endpointUrl:     isS3 && endpointUrl.value.trim() ? endpointUrl.value.trim() : undefined,
       region:          isS3 ? region.value.trim() : undefined,
       accessKey:       isS3 ? accessKey.value.trim() : undefined,
-      secretKey:       isS3 ? secretKey.value.trim() : undefined,
+      secretKey:       isS3 ? secretKey.value.trim() : gcsSecret,
       sslVerification: isS3 ? sslVerify.checked : true,
+      gcsAuthType:     isGcs && gcsAuthType ? gcsAuthType.value : undefined,
+      projectId:       isGcs && gcsProjectId && gcsProjectId.value.trim() ? gcsProjectId.value.trim() : undefined,
     });
 
-    // Wipe credential fields immediately after sending (FR-3)
-    accessKey.value = '';
-    secretKey.value = '';
+    // Note: Credential fields are kept until saveSuccess to prevent losing input on errors.
   });
 
   const MASK_VALUE = '••••••••';
@@ -388,6 +645,39 @@ export function getSettingsHtml(
   }
   accessKey.addEventListener('focus', function () { handleMaskFocus(accessKey); });
   secretKey.addEventListener('focus', function () { handleMaskFocus(secretKey); });
+  if (gcsKeyFile) {
+    gcsKeyFile.addEventListener('focus', function () { handleMaskFocus(gcsKeyFile); });
+    gcsKeyFile.addEventListener('input', function () {
+      var val = gcsKeyFile.value.trim();
+      if (val.startsWith('{')) {
+        if (gcsKeyJson) gcsKeyJson.value = gcsKeyFile.value;
+        gcsKeyFile.value = '';
+        setGcsKeyMode('paste');
+        formatOrValidateJson();
+      }
+      clearGcsKeyError();
+    });
+  }
+  if (gcsKeyJson) {
+    gcsKeyJson.addEventListener('input', function () {
+      var val = gcsKeyJson.value.trim();
+      if ((val.startsWith('/') || val.startsWith('~/')) && !val.includes('\\n')) {
+        if (gcsKeyFile) gcsKeyFile.value = val;
+        gcsKeyJson.value = '';
+        setGcsKeyMode('file');
+      }
+      clearGcsKeyError();
+    });
+  }
+  if (gcsProjectId) {
+    gcsProjectId.addEventListener('input', function () {
+      var el = document.getElementById('err-gcs-project');
+      if (el) {
+        el.textContent = '';
+        el.classList.remove('visible');
+      }
+    });
+  }
 
   // Clear field errors when the user types
   connLabel.addEventListener('input', function () {
@@ -444,6 +734,13 @@ export function getSettingsHtml(
           existingConnections = msg.connections;
         }
         break;
+      case 'keyFileSelected':
+        if (gcsKeyFile && msg.filePath) {
+          gcsKeyFile.value = msg.filePath;
+          setGcsKeyMode('file');
+          clearGcsKeyError();
+        }
+        break;
       case 'saveSuccess':
         showBanner('Connection saved and activated.', false);
         if (Array.isArray(msg.connections)) {
@@ -453,11 +750,16 @@ export function getSettingsHtml(
         connId.value = '';
         accessKey.value = '';
         secretKey.value = '';
+        if (gcsKeyFile) gcsKeyFile.value = '';
+        if (gcsKeyJson) gcsKeyJson.value = '';
+        if (gcsJsonStatus) gcsJsonStatus.textContent = '';
+        setGcsKeyMode('file');
         if (formHeading) formHeading.textContent = 'New Connection';
         if (credsNote) {
           credsNote.textContent = '';
           credsNote.style.display = 'none';
         }
+        if (gcsCredsNote) gcsCredsNote.style.display = 'none';
         break;
       case 'saveError':
         showBanner(msg.message || 'Failed to save connection.', true);
@@ -482,6 +784,9 @@ export function getSettingsHtml(
             pathMsg = pathMsg.replace('Validation failed:', '').trim();
           }
           showError('err-path', pathMsg);
+        }
+        if (msg.message && (msg.message.toLowerCase().includes('service account') || msg.message.toLowerCase().includes('key file') || msg.message.toLowerCase().includes('json') || msg.message.includes('secretKey:'))) {
+          showError('err-gcs-key', msg.message);
         }
         break;
       case 'activateSuccess':
@@ -518,6 +823,32 @@ export function getSettingsHtml(
             credsNote.textContent = 'Existing credentials are saved. Enter new values only to update credentials.';
             credsNote.style.display = 'block';
           }
+          if (gcsKeyFile) gcsKeyFile.value = '';
+          if (gcsKeyJson) gcsKeyJson.value = '';
+          if (gcsCredsNote) gcsCredsNote.style.display = 'none';
+        } else if (msg.config.connectionType === 'gcs') {
+          accessKey.value = '';
+          secretKey.value = '';
+          if (credsNote) credsNote.style.display = 'none';
+          if (gcsAuthType) {
+            gcsAuthType.value = msg.config.gcsAuthType || 'adc';
+          }
+          if (gcsProjectId) {
+            gcsProjectId.value = msg.config.projectId || '';
+          }
+          if (msg.config.gcsAuthType === 'serviceAccountKey' && msg.hasSavedCredentials) {
+            if (gcsKeyFile) gcsKeyFile.value = MASK_VALUE;
+            if (gcsKeyJson) gcsKeyJson.value = '';
+            setGcsKeyMode('file');
+            if (gcsCredsNote) {
+              gcsCredsNote.textContent = 'Existing service account key is saved. Enter a new value only to update credentials.';
+              gcsCredsNote.style.display = 'block';
+            }
+          } else {
+            if (gcsKeyFile) gcsKeyFile.value = '';
+            if (gcsKeyJson) gcsKeyJson.value = '';
+            if (gcsCredsNote) gcsCredsNote.style.display = 'none';
+          }
         } else {
           accessKey.value = '';
           secretKey.value = '';
@@ -525,6 +856,9 @@ export function getSettingsHtml(
             credsNote.textContent = '';
             credsNote.style.display = 'none';
           }
+          if (gcsKeyFile) gcsKeyFile.value = '';
+          if (gcsKeyJson) gcsKeyJson.value = '';
+          if (gcsCredsNote) gcsCredsNote.style.display = 'none';
         }
         applyType();
         break;

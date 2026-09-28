@@ -384,10 +384,11 @@ export function getMetadataDetailHtml(
   }
 
   function resourcePathToBreadcrumbs(resourcePath) {
-    var normalised = resourcePath.replace(/\\\\/g, '/');
+    var normalised = resourcePath.replace(/\\\\/g, '/').replace(/^gcs:\/\//, 'gs://');
     var parts;
-    if (normalised.startsWith('s3://')) {
-      var withoutScheme = normalised.slice('s3://'.length);
+    if (normalised.startsWith('s3://') || normalised.startsWith('gs://')) {
+      var schemeLen = normalised.startsWith('s3://') ? 's3://'.length : 'gs://'.length;
+      var withoutScheme = normalised.slice(schemeLen);
       parts = withoutScheme.split('/').filter(Boolean);
       var metaIdx = parts.lastIndexOf('metadata');
       if (metaIdx >= 3) {

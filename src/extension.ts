@@ -3,6 +3,7 @@ import { ConnectionManager } from './connection/index.js';
 import { WebviewPanelManager } from './panels/webviewPanelManager.js';
 import { LocalFsAdapter } from './storage/localFsAdapter.js';
 import { S3Adapter } from './storage/s3Adapter.js';
+import { GcsAdapter } from './storage/gcsAdapter.js';
 import { IcebergTreeProvider, registerTreeCommands } from './tree/index.js';
 import { QueryEngine } from './query/index.js';
 
@@ -44,12 +45,16 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const localFsAdapter = new LocalFsAdapter(logger);
   const s3Adapter = new S3Adapter(logger);
+  const gcsAdapter = new GcsAdapter(logger);
+
+  const getAdapterForType = (type: 'local' | 's3' | 'gcs') =>
+    type === 's3' ? s3Adapter : type === 'gcs' ? gcsAdapter : localFsAdapter;
 
   // Callback injected into tree provider and commands to activate a connection by id.
   const activateConnectionCallback = async (id: string) => {
     const result = await connectionManager.activateConnection(id);
     if (result instanceof Error) { return result; }
-    const adapter = result.connectionType === 's3' ? s3Adapter : localFsAdapter;
+    const adapter = getAdapterForType(result.connectionType);
     return { handle: result, adapter };
   };
 
@@ -119,7 +124,7 @@ export function activate(context: vscode.ExtensionContext): void {
         // saveConnection returns string | Error; throw on Error so the panel
         // can post saveError (design.md §2.5.2)
         async (config, creds) => {
-          const adapter = config.connectionType === 's3' ? s3Adapter : localFsAdapter;
+          const adapter = getAdapterForType(config.connectionType);
           const result = await connectionManager.saveConnection(config, creds, adapter);
           if (result instanceof Error) { throw result; }
           // Keep the tree in sync after save
@@ -134,7 +139,7 @@ export function activate(context: vscode.ExtensionContext): void {
             return { kind: 'StorageError' as const, class: 'internal' as const, message: result.message };
           }
           // Notify tree provider of the newly activated connection (FR-7)
-          const adapter = result.connectionType === 's3' ? s3Adapter : localFsAdapter;
+          const adapter = getAdapterForType(result.connectionType);
           treeProvider.setActiveConnectionId(id);
           treeProvider.setActiveConnection(result, adapter);
           return result;

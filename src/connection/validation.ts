@@ -42,11 +42,11 @@ export function validateConnectionInput(
     }
   }
 
-  // CM-V1 — connectionType must be "s3" or "local"
-  if (config.connectionType !== 's3' && config.connectionType !== 'local') {
+  // CM-V1 — connectionType must be "s3", "gcs", or "local"
+  if (config.connectionType !== 's3' && config.connectionType !== 'local' && config.connectionType !== 'gcs') {
     errors.push({
       field: 'connectionType',
-      message: 'Connection type must be "s3" or "local".',
+      message: 'Connection type must be "s3", "gcs", or "local".',
     });
     // Short-circuit: remaining rules depend on connectionType
     return { valid: false, errors };
@@ -93,6 +93,27 @@ export function validateConnectionInput(
     }
   }
 
+  if (config.connectionType === 'gcs') {
+    // Warehouse path must be non-empty and a valid GCS URI
+    if (!config.warehousePath || config.warehousePath.trim() === '') {
+      errors.push({ field: 'warehousePath', message: 'Warehouse path is required for GCS connections.' });
+    } else if (!/^(?:gs|gcs):\/\/[^/]+/i.test(config.warehousePath.trim())) {
+      errors.push({
+        field: 'warehousePath',
+        message: 'Warehouse path must be a valid GCS URI (e.g. gs://bucket/warehouse-path).',
+      });
+    }
+
+    if (config.gcsAuthType === 'serviceAccountKey') {
+      if (!credentials.secretKey || credentials.secretKey.trim() === '') {
+        errors.push({
+          field: 'secretKey',
+          message: 'Service account key JSON or file path is required when using Service Account authentication.',
+        });
+      }
+    }
+  }
+
   if (config.connectionType === 'local') {
     // CM-V5 — warehousePath must be non-empty and absolute (starts with "/" on macOS)
     if (!config.warehousePath || config.warehousePath.trim() === '') {
@@ -129,6 +150,13 @@ export async function validateWarehouseStructure(
     };
   }
 
+  const example =
+    handle.connectionType === 'gcs'
+      ? 'gs://warehouse-path/<schema>/<table>/'
+      : handle.connectionType === 's3'
+        ? 's3://warehouse-path/<schema>/<table>/'
+        : '/warehouse-path/<schema>/<table>/';
+
   if (schemas.length === 0) {
     return {
       valid: false,
@@ -136,7 +164,7 @@ export async function validateWarehouseStructure(
         {
           field: 'warehousePath',
           message:
-            'No schemas found in warehouse path. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. s3://warehouse-path/<schema>/<table>/).',
+            `No schemas found in warehouse path. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. ${example}).`,
         },
       ],
     };
@@ -167,7 +195,7 @@ export async function validateWarehouseStructure(
         {
           field: 'warehousePath',
           message:
-            'No Iceberg tables found under any schema directory. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. s3://warehouse-path/<schema>/<table>/).',
+            `No Iceberg tables found under any schema directory. Iceberg Explorer expects schemas and tables directly under warehousePath (e.g. ${example}).`,
         },
       ],
     };

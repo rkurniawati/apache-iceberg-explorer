@@ -82,6 +82,35 @@ export function mapS3Error(raw: unknown): StorageError {
   return storageError('internal', 'An unexpected error occurred.');
 }
 
+/**
+ * Maps a Google Cloud Storage error to a structured StorageError.
+ * HTTP 401 / 403 → access-denied; 404 → not-found; syntax/parse → parse-failure; all others → internal.
+ */
+export function mapGcsError(raw: unknown): StorageError {
+  if (raw && typeof raw === 'object') {
+    const code = (raw as { code?: number | string }).code;
+    const msg = (raw as { message?: string }).message?.toLowerCase() ?? '';
+    if (
+      code === 401
+      || code === 403
+      || msg.includes('permission denied')
+      || msg.includes('unauthorized')
+      || msg.includes('access denied')
+      || msg.includes('invalid credentials')
+    ) {
+      return storageError('access-denied', 'Access denied.');
+    }
+    if (code === 404 || msg.includes('not found') || msg.includes('no such')) {
+      return storageError('not-found', 'Resource not found.');
+    }
+    if (raw instanceof SyntaxError || msg.includes('unexpected token') || msg.includes('parse error')) {
+      return storageError('parse-failure', 'Could not parse file content.');
+    }
+    return storageError('internal', 'An unexpected storage error occurred.');
+  }
+  return storageError('internal', 'An unexpected error occurred.');
+}
+
 // ---------------------------------------------------------------------------
 // Type guards
 // ---------------------------------------------------------------------------

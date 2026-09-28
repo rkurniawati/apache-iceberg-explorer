@@ -9,11 +9,15 @@
 import * as vscode from 'vscode';
 import { Agent } from 'node:https';
 import { S3Client, type S3ClientConfig } from '@aws-sdk/client-s3';
+import { Storage, type StorageOptions } from '@google-cloud/storage';
 import * as crypto from 'node:crypto';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 
 import type { ILogger } from '../extension.js';
 import type { ConnectionConfig } from './types.js';
-import type { ActiveConnectionHandle, S3Config } from '../storage/types.js';
+import type { ActiveConnectionHandle, S3Config, GcsConfig } from '../storage/types.js';
 import type { StorageAdapter } from '../storage/StorageAdapter.js';
 import { validateConnectionInput, validateWarehouseStructure } from './validation.js';
 
@@ -77,6 +81,11 @@ export class ConnectionManager {
    * Checks whether credentials exist in SecretStorage for the given connection ID.
    */
   async hasCredential(id: string): Promise<boolean> {
+    const configs = this._readConfigs();
+    const config = configs.find((c) => c.id === id);
+    if (config?.connectionType === 'gcs' && (config.gcsAuthType === 'adc' || !config.gcsAuthType)) {
+      return true;
+    }
     const cred = await this._loadCredential(id);
     return cred !== undefined;
   }
@@ -117,7 +126,7 @@ export class ConnectionManager {
     let effectiveAccessKey = credentials.accessKey ? credentials.accessKey.trim() : '';
     let effectiveSecretKey = credentials.secretKey ? credentials.secretKey.trim() : '';
 
-    if (fullConfig.connectionType === 's3') {
+    if (fullConfig.connectionType === 's3' || fullConfig.connectionType === 'gcs') {
       const existingCred = fullConfig.id ? await this._loadCredential(fullConfig.id) : undefined;
       if (isMaskedCredential(effectiveAccessKey)) {
         effectiveAccessKey = existingCred?.ak ?? '';
@@ -152,6 +161,16 @@ export class ConnectionManager {
           warehousePath: fullConfig.warehousePath,
           s3Config,
         };
+      } else if (fullConfig.connectionType === 'gcs') {
+        const gcsConfig = buildGcsConfig(fullConfig, {
+          ak: 'gcs',
+          sk: effectiveCreds.secretKey.trim(),
+        });
+        handle = {
+          connectionType: 'gcs',
+          warehousePath: fullConfig.warehousePath,
+          gcsConfig,
+        };
       } else {
         handle = {
           connectionType: 'local',
@@ -183,6 +202,29 @@ export class ConnectionManager {
       );
       this._logger.info(
         `Credentials stored in SecretStorage: id=${fullConfig.id}`,
+      );
+    } else if (fullConfig.connectionType === 'gcs' && fullConfig.gcsAuthType === 'serviceAccountKey' && credsChanged) {
+      let keyToStore = effectiveCreds.secretKey.trim();
+      try {
+        const parsedKey = parseServiceAccountKeyInput(keyToStore);
+        if (parsedKey.credentials && !parsedKey.keyFilename) {
+          keyToStore = JSON.stringify(parsedKey.credentials);
+        } else if (parsedKey.keyFilename) {
+          keyToStore = parsedKey.keyFilename;
+        }
+      } catch {
+        // Fall back to trimmed raw input if parsing had issues
+      }
+      const stored: StoredCredential = {
+        ak: 'gcs',
+        sk: keyToStore,
+      };
+      await this._secrets.store(
+        `${SECRET_KEY_PREFIX}${fullConfig.id}`,
+        JSON.stringify(stored),
+      );
+      this._logger.info(
+        `GCS service account key stored in SecretStorage: id=${fullConfig.id}`,
       );
     }
 
@@ -220,9 +262,9 @@ export class ConnectionManager {
 
   /**
    * Activates a saved connection by id.
-   * Looks up the config in globalState and, for S3 connections, retrieves
-   * credentials from SecretStorage and constructs a fresh S3Client.
-   * The S3Client encapsulates credentials opaquely; they are never accessible
+   * Looks up the config in globalState and, for S3/GCS connections, retrieves
+   * credentials from SecretStorage and constructs a fresh client.
+   * The client encapsulates credentials opaquely; they are never accessible
    * as strings after this point (AD-4, NFR-7).
    *
    * @returns An ActiveConnectionHandle on success, or an Error.
@@ -243,6 +285,32 @@ export class ConnectionManager {
 
     if (config.connectionType === 'local') {
       return { connectionType: 'local', warehousePath: config.warehousePath };
+    }
+
+    if (config.connectionType === 'gcs') {
+      let cred: StoredCredential | undefined;
+      if (config.gcsAuthType === 'serviceAccountKey') {
+        cred = await this._loadCredential(config.id);
+        if (!cred) {
+          this._logger.error(
+            `ConnectionManager.activateConnection: credential not found in SecretStorage: id=${id}`,
+          );
+          return new Error(
+            `Credentials not found for connection "${config.label}". Please re-enter them.`,
+          );
+        }
+      }
+      try {
+        const gcsConfig = buildGcsConfig(config, cred);
+        return {
+          connectionType: 'gcs',
+          warehousePath: config.warehousePath,
+          gcsConfig,
+        };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        return new Error(`Failed to activate GCS connection: ${msg}`);
+      }
     }
 
     // S3 — retrieve credentials from SecretStorage (T-10, T-11)
@@ -486,4 +554,221 @@ function parseS3Uri(uri: string): { bucket: string; keyPrefix: string } {
     throw new Error(`Invalid S3 URI: "${uri}"`);
   }
   return { bucket: match[1]!, keyPrefix: (match[2] ?? '').replace(/\/+$/, '') };
+}
+
+/**
+ * Parses a GCS URI like "gs://bucket/key/prefix" into { bucket, keyPrefix }.
+ * Normalises gcs:// to gs://. Throws if the URI cannot be parsed.
+ */
+export function parseGcsUri(uri: string): { bucket: string; keyPrefix: string } {
+  const normalised = uri.trim().replace(/^gcs:\/\//, 'gs://');
+  const match = /^gs:\/\/([^/]+)\/?(.*)$/.exec(normalised);
+  if (!match) {
+    throw new Error(`Invalid GCS URI: "${uri}"`);
+  }
+  return { bucket: match[1]!, keyPrefix: (match[2] ?? '').replace(/\/+$/, '') };
+}
+
+/**
+ * Normalises and parses a Google Cloud Service Account key input, which may be:
+ * 1. A JSON string (pretty-printed or minified, possibly with Markdown code fences, wrapping quotes,
+ *    or raw newlines in private_key).
+ * 2. A file path pointing to a .json key file on the local file system (with optional ~ expansion).
+ *
+ * Returns either:
+ * - { credentials: Record<string, any> } for in-memory JSON objects
+ * - { keyFilename: string } for existing file paths
+ * Throws a descriptive Error if parsing fails or if the key file is not found.
+ */
+export function parseServiceAccountKeyInput(raw: string): { credentials?: Record<string, any>; keyFilename?: string } {
+  let s = raw.trim();
+  if (!s) {
+    throw new Error('Service Account Key is empty.');
+  }
+
+  // Strip Markdown code fences if user copied ```json ... ```
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  }
+
+  // Strip wrapping outer quotes if user copied "'{...}'" or '"..."'
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+    s = s.slice(1, -1).trim();
+  }
+
+  // Check if it's a file path:
+  // If it doesn't start with '{', it's almost certainly a file path
+  if (!s.startsWith('{')) {
+    let filePath = s;
+    if (filePath.startsWith('~/') || filePath === '~') {
+      filePath = path.join(os.homedir(), filePath.slice(1));
+    }
+    // Remove surrounding quotes from path if any
+    filePath = filePath.replace(/^['"]+|['"]+$/g, '');
+
+    if (fs.existsSync(filePath)) {
+      try {
+        const fileContent = fs.readFileSync(filePath, 'utf8');
+        // Parse the file content to ensure it's valid JSON credentials
+        const creds = parseJsonCredentials(fileContent);
+        return { credentials: creds, keyFilename: filePath };
+      } catch (err: unknown) {
+        const msg = err instanceof Error ? err.message : String(err);
+        throw new Error(`Failed to read Service Account key file at "${filePath}": ${msg}`);
+      }
+    } else {
+      // If it looks like a path (e.g. ends with .json or has / or \), report file not found
+      if (s.includes('/') || s.includes('\\') || s.endsWith('.json')) {
+        throw new Error(`Service Account key file not found: "${filePath}". Please check that the file exists.`);
+      }
+      throw new Error(`Invalid Service Account Key: expected a valid JSON object or an existing .json file path.`);
+    }
+  }
+
+  // It starts with '{', so parse as JSON
+  const credentials = parseJsonCredentials(s);
+  return { credentials };
+}
+
+/**
+ * Validates that an object contains Google Cloud Service Account fields.
+ */
+function validateServiceAccountObject(obj: any): void {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) {
+    throw new Error('Service Account credentials must be a JSON object.');
+  }
+
+  // If user provided a wrapper object like { path: "..." } or { keyFilename: "..." }
+  if (obj.keyFilename || obj.keyFile || obj.path) {
+    let p = String(obj.keyFilename || obj.keyFile || obj.path);
+    if (p.startsWith('~/')) {
+      p = path.join(os.homedir(), p.slice(2));
+    }
+    if (fs.existsSync(p)) {
+      const content = fs.readFileSync(p, 'utf8');
+      const inner = JSON.parse(content);
+      validateServiceAccountObject(inner);
+      return;
+    }
+  }
+
+  const hasClientEmail = typeof obj.client_email === 'string' && obj.client_email.includes('@');
+  const hasPrivateKey = typeof obj.private_key === 'string' && obj.private_key.length > 0;
+  const isServiceAccountType = obj.type === 'service_account';
+  const hasProjectId = typeof obj.project_id === 'string' && obj.project_id.length > 0;
+
+  if (!hasClientEmail && !hasPrivateKey && !isServiceAccountType && !hasProjectId) {
+    throw new Error(
+      'JSON does not appear to be a Google Cloud Service Account key (missing "client_email", "private_key", or "type": "service_account").'
+    );
+  }
+}
+
+/**
+ * Parses a JSON string containing Service Account credentials with multiple fallback repairs
+ * for common copy-paste errors (raw newlines in private_key, trailing commas, single quotes).
+ */
+export function parseJsonCredentials(rawJson: string): Record<string, any> {
+  let s = rawJson.trim();
+
+  // Strip Markdown fences and quotes if present
+  if (s.startsWith('```')) {
+    s = s.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  }
+  if ((s.startsWith("'") && s.endsWith("'")) || (s.startsWith('"') && s.endsWith('"'))) {
+    s = s.slice(1, -1).trim();
+  }
+
+  // Strategy 1: Standard JSON.parse
+  try {
+    const obj = JSON.parse(s);
+    validateServiceAccountObject(obj);
+    return obj;
+  } catch (err1: unknown) {
+    const errMessage1 = err1 instanceof Error ? err1.message : String(err1);
+
+    // Strategy 2: Fix raw unescaped newlines in "private_key" string literal
+    try {
+      const fixedNewlines = s.replace(/"private_key"\s*:\s*"([^"]*)"/gs, (_m, keyVal) => {
+        const escaped = keyVal.replace(/\r?\n/g, '\\n');
+        return `"private_key": "${escaped}"`;
+      });
+      const obj = JSON.parse(fixedNewlines);
+      validateServiceAccountObject(obj);
+      return obj;
+    } catch { /* proceed to next fallback */ }
+
+    // Strategy 3: Remove trailing commas before } or ]
+    try {
+      const fixedCommas = s.replace(/,(\s*[}\]])/g, '$1');
+      const obj = JSON.parse(fixedCommas);
+      validateServiceAccountObject(obj);
+      return obj;
+    } catch { /* proceed to next fallback */ }
+
+    // Strategy 4: Convert Python dict single quotes to double quotes
+    try {
+      const fixedQuotes = s.replace(/'/g, '"');
+      const obj = JSON.parse(fixedQuotes);
+      validateServiceAccountObject(obj);
+      return obj;
+    } catch { /* proceed to next fallback */ }
+
+    // Strategy 5: Fix unescaped newlines in any string value
+    try {
+      const relaxed = s.replace(/:(\s*)"([^"\\]*(?:\\.[^"\\]*)*)"/gs, (_m, pre, inner) => {
+        return `:${pre}"${inner.replace(/\r?\n/g, '\\n')}"`;
+      });
+      const obj = JSON.parse(relaxed);
+      validateServiceAccountObject(obj);
+      return obj;
+    } catch { /* proceed to next fallback */ }
+
+    // Strategy 6: Combine single-quote, trailing-comma, and newline fixes
+    try {
+      let combined = s;
+      if (combined.includes("'")) {
+        combined = combined.replace(/'([^'\\]*(?:\\.[^'\\]*)*)'/g, '"$1"');
+      }
+      combined = combined.replace(/,(\s*[}\]])/g, '$1');
+      combined = combined.replace(/"private_key"\s*:\s*"([^"]*)"/gs, (_m, keyVal) => {
+        return `"private_key": "${keyVal.replace(/\r?\n/g, '\\n')}"`;
+      });
+      const obj = JSON.parse(combined);
+      validateServiceAccountObject(obj);
+      return obj;
+    } catch { /* proceed to throw */ }
+
+    throw new Error(`Invalid Service Account JSON (${errMessage1}). Please ensure valid JSON or specify a key file path.`);
+  }
+}
+
+/**
+ * Constructs a GcsConfig from a ConnectionConfig and optional credentials.
+ */
+export function buildGcsConfig(
+  config: ConnectionConfig,
+  cred?: StoredCredential,
+): GcsConfig {
+  const options: StorageOptions = {};
+  if (config.projectId && config.projectId.trim() !== '') {
+    options.projectId = config.projectId.trim();
+  }
+
+  if (config.gcsAuthType === 'serviceAccountKey') {
+    const rawKey = cred?.sk?.trim() ?? '';
+    if (rawKey) {
+      const parsed = parseServiceAccountKeyInput(rawKey);
+      if (parsed.credentials) {
+        options.credentials = parsed.credentials;
+      }
+      if (parsed.keyFilename) {
+        options.keyFilename = parsed.keyFilename;
+      }
+    }
+  }
+
+  const client = new Storage(options);
+  const { bucket, keyPrefix } = parseGcsUri(config.warehousePath);
+  return { client, bucket, keyPrefix };
 }

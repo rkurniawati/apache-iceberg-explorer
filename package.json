@@ -1,7 +1,7 @@
 {
   "name": "iceberg-explorer",
   "displayName": "Iceberg Explorer",
-  "description": "Browse Apache Iceberg warehouses in S3-compatible storage or local file system from VS Code.",
+  "description": "Browse Apache Iceberg warehouses in Google Cloud Storage, S3-compatible storage, or local file system from VS Code.",
   "version": "0.0.1",
   "publisher": "TBD",
   "engines": {
@@ -101,7 +101,7 @@
       },
       {
         "view": "icebergExplorer",
-        "contents": "No Iceberg connections configured.\n[Add Connection](command:icebergExplorer.openSettings)\n\nConfigure a connection to local or S3-compatible Iceberg tables.",
+        "contents": "No Iceberg connections configured.\n[Add Connection](command:icebergExplorer.openSettings)\n\nConfigure a connection to local, S3-compatible, or Google Cloud Storage Iceberg tables.",
         "when": "icebergExplorer.initialized"
       }
     ]
@@ -118,12 +118,14 @@
     "test:slice-tree": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-tree-view.test.ts",
     "test:slice-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-manifest-panels.test.ts",
     "test:slice-new-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts",
+    "test:slice-gcs": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-gcs.test.ts",
     "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package",
     "postcompile": "npm run copy-wasm"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.750.0",
     "@duckdb/duckdb-wasm": "^1.29.0",
+    "@google-cloud/storage": "^8.2.0",
     "avsc": "^5.7.7",
     "pgsql-ast-parser": "^12.0.2",
     "ts-node": "^10.9.2"

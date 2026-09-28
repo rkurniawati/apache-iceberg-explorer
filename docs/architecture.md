@@ -21,7 +21,7 @@ VS Code extensions run in a multi-process model. In this extension, code is spli
 │                                                                        │
 │  extension.ts                                                          │
 │   ├── connection/    SecretStorage & Connection configs                │
-│   ├── storage/       LocalFs (node:fs) & S3 (@aws-sdk/client-s3)       │
+│   ├── storage/       LocalFs, S3, & GCS (@google-cloud/storage)        │
 │   ├── tree/          VS Code Sidebar TreeDataProvider                  │
 │   ├── query/         DuckDB-WASM (node:worker_threads) & Avro (avsc)   │
 │   └── panels/        WebviewPanelManager & WebviewReadyGate            │
@@ -50,21 +50,23 @@ All backend logic, storage adapters, heavy computation, and VS Code API hooks ru
 ### Extension Lifecycle & Commands (`src/extension.ts`)
 - Manages `activate()` and `deactivate()`.
 - Creates and shares the single extension output channel logger (`ILogger`).
-- Instantiates core singletons (`ConnectionManager`, `LocalFsAdapter`, `S3Adapter`, `QueryEngine`, `WebviewPanelManager`).
+- Instantiates core singletons (`ConnectionManager`, `LocalFsAdapter`, `S3Adapter`, `GcsAdapter`, `QueryEngine`, `WebviewPanelManager`).
 - Wires up the sidebar `vscode.window.createTreeView`.
 - Registers VS Code commands (`icebergExplorer.openSettings`, `icebergExplorer.openTableOverview`, etc.).
 
 ### Connection & Credentials (`src/connection/`)
 - **`ConnectionManager`**:
   - Persists non-secret connection configurations to `vscode.ExtensionContext.globalState`.
-  - Securely stores sensitive AWS credentials (`accessKeyId`, `secretAccessKey`, `sessionToken`) in `vscode.SecretStorage`.
+  - Securely stores sensitive AWS credentials (`accessKeyId`, `secretAccessKey`, `sessionToken`) and GCS Service Account Keys in `vscode.SecretStorage`.
+  - Seamlessly supports Google Cloud Application Default Credentials (ADC) without requiring stored secrets.
 - Handles active connection switching and schema validation.
 
 ### Storage Adapters (`src/storage/`)
 - **`StorageAdapter`** interface: Abstracts reading metadata files and directories across different backends.
 - **`LocalFsAdapter`**: Uses `node:fs` and `node:fs/promises` to read Iceberg tables from the local disk.
 - **`S3Adapter`**: Uses `@aws-sdk/client-s3` to query metadata and data files from AWS S3, MinIO, or custom S3-compatible object storage endpoints.
-- Standardizes errors (`access-denied`, `not-found`, `parse-failure`, `internal`) across both storage providers.
+- **`GcsAdapter`**: Uses `@google-cloud/storage` to query Iceberg tables stored in Google Cloud Storage (`gs://` or `gcs://`), supporting both ADC (zero config) and Service Account Keys (raw JSON or key file path).
+- Standardizes errors (`access-denied`, `not-found`, `parse-failure`, `internal`) across storage providers.
 
 ### Sidebar Tree View (`src/tree/`)
 - **`IcebergTreeProvider`**: Implements `vscode.TreeDataProvider` to render the tree in the VS Code Activity Bar:
@@ -201,7 +203,7 @@ Using DuckDB-WASM allows the extension to query Parquet files without requiring 
 | :--- | :--- | :--- |
 | `src/extension.ts` | **Node.js** | Extension entry point & dependency wiring |
 | `src/connection/*` | **Node.js** | Connection configs & credentials in SecretStorage |
-| `src/storage/*` | **Node.js** | File I/O via `node:fs` and S3 client |
+| `src/storage/*` | **Node.js** | File I/O via `node:fs`, AWS S3, and Google Cloud Storage |
 | `src/tree/*` | **Node.js** | Sidebar tree view & context menu commands |
 | `src/query/*` | **Node.js** | DuckDB-WASM in `worker_threads`, Avro parsing, SQL analyzer |
 | `src/panels/webviewPanelManager.ts` | **Node.js** | Panel orchestration, state tracking, and message routing |

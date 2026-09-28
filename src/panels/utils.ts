@@ -44,12 +44,13 @@ export function lastPathSegment(resourcePath: string): string {
  * (FR-18, T-27)
  */
 export function resourcePathToBreadcrumbs(resourcePath: string): string[] {
-  // Normalise Hadoop-style s3a:// / s3n:// to s3:// so breadcrumb logic is uniform.
-  const normalised = resourcePath.replace(/\\/g, '/').replace(/^s3[an]:\/\//, 's3://');
+  // Normalise Hadoop-style s3a:// / s3n:// to s3://, and gcs:// to gs:// so breadcrumb logic is uniform.
+  const normalised = resourcePath.replace(/\\/g, '/').replace(/^s3[an]:\/\//, 's3://').replace(/^gcs:\/\//, 'gs://');
   let parts: string[];
 
-  if (normalised.startsWith('s3://')) {
-    const withoutScheme = normalised.slice('s3://'.length);
+  if (normalised.startsWith('s3://') || normalised.startsWith('gs://')) {
+    const scheme = normalised.startsWith('s3://') ? 's3://' : 'gs://';
+    const withoutScheme = normalised.slice(scheme.length);
     parts = withoutScheme.split('/').filter(Boolean);
     const metaIdx = parts.lastIndexOf('metadata');
     const folderIdx = metaIdx >= 0 ? metaIdx : parts.lastIndexOf('data');

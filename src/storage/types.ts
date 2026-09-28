@@ -4,6 +4,7 @@
  */
 
 import type { S3Client } from '@aws-sdk/client-s3';
+import type { Storage } from '@google-cloud/storage';
 
 // ---------------------------------------------------------------------------
 // Active-Connection Handle  (design.md §2.2.2)
@@ -19,6 +20,16 @@ export interface S3Config {
   keyPrefix: string;
 }
 
+/** GCS-specific sub-object held on the active-connection handle. */
+export interface GcsConfig {
+  /** Fully initialised Storage client; credentials are encapsulated inside the SDK instance. */
+  client: Storage;
+  /** Bucket name parsed from warehousePath (e.g. the "bucket" in gs://bucket/prefix). */
+  bucket: string;
+  /** Key prefix for the warehouse root (e.g. "prefix" in gs://bucket/prefix). */
+  keyPrefix: string;
+}
+
 /** Transient runtime object constructed by ConnectionManager and passed to the Storage Layer. */
 export type ActiveConnectionHandle =
   | {
@@ -31,6 +42,12 @@ export type ActiveConnectionHandle =
       /** S3 URI of the warehouse root, e.g. "s3://bucket/prefix". */
       warehousePath: string;
       s3Config: S3Config;
+    }
+  | {
+      connectionType: 'gcs';
+      /** GCS URI of the warehouse root, e.g. "gs://bucket/prefix". */
+      warehousePath: string;
+      gcsConfig: GcsConfig;
     };
 
 // ---------------------------------------------------------------------------

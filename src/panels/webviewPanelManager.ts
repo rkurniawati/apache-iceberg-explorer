@@ -1080,7 +1080,7 @@ export class WebviewPanelManager {
       }
       // If an editConfig was provided, post the editConnection message to pre-fill
       if (editConfig) {
-        const hasSavedCredentials = (editConfig.connectionType === 's3') && (hasCredential ? await hasCredential(editConfig.id) : true);
+        const hasSavedCredentials = (editConfig.connectionType === 's3' || (editConfig.connectionType === 'gcs' && editConfig.gcsAuthType === 'serviceAccountKey')) && (hasCredential ? await hasCredential(editConfig.id) : true);
         void existing.panel.webview.postMessage({
           type: 'editConnection',
           config: {
@@ -1091,6 +1091,8 @@ export class WebviewPanelManager {
             endpointUrl: editConfig.endpointUrl,
             region: editConfig.region,
             sslVerification: editConfig.sslVerification,
+            gcsAuthType: editConfig.gcsAuthType,
+            projectId: editConfig.projectId,
           },
           hasSavedCredentials,
         });
@@ -1140,12 +1142,14 @@ export class WebviewPanelManager {
             const config: ConnectionConfig = {
               id: msg.id ? String(msg.id) : `conn-${Date.now()}`,
               label:          String(msg.label ?? '').trim(),
-              connectionType: (msg.connectionType as 'local' | 's3'),
+              connectionType: (msg.connectionType as 'local' | 's3' | 'gcs'),
               warehousePath:  String(msg.warehousePath ?? '').trim(),
               endpointUrl:    endpointUrlStr && endpointUrlStr !== '' ? endpointUrlStr : undefined,
               region:         msg.region      !== undefined ? String(msg.region).trim()      : undefined,
               sslVerification: Boolean(msg.sslVerification ?? true),
               savedAt: Date.now(),
+              gcsAuthType:    msg.gcsAuthType !== undefined ? (String(msg.gcsAuthType) as 'adc' | 'serviceAccountKey') : undefined,
+              projectId:      msg.projectId   !== undefined ? String(msg.projectId).trim() || undefined : undefined,
             };
             const creds = {
               accessKey: String(msg.accessKey ?? '').trim(),
@@ -1188,6 +1192,28 @@ export class WebviewPanelManager {
             }
             break;
           }
+
+          case 'browseKeyFile': {
+            try {
+              const uris = await vscode.window.showOpenDialog({
+                canSelectFiles: true,
+                canSelectFolders: false,
+                canSelectMany: false,
+                filters: { 'JSON Files': ['json'] },
+                title: 'Select Google Cloud Service Account Key File',
+              });
+              if (uris && uris[0]) {
+                void panel.webview.postMessage({
+                  type: 'keyFileSelected',
+                  filePath: uris[0].fsPath,
+                });
+              }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              this.logger.error(`Settings panel: browseKeyFile failed: ${message}`);
+            }
+            break;
+          }
         }
       },
       undefined,
@@ -1196,7 +1222,7 @@ export class WebviewPanelManager {
 
     // If an editConfig was provided, post the editConnection message to pre-fill the form.
     if (editConfig) {
-      const hasSavedCredentials = (editConfig.connectionType === 's3') && (hasCredential ? await hasCredential(editConfig.id) : true);
+      const hasSavedCredentials = (editConfig.connectionType === 's3' || (editConfig.connectionType === 'gcs' && editConfig.gcsAuthType === 'serviceAccountKey')) && (hasCredential ? await hasCredential(editConfig.id) : true);
       void panel.webview.postMessage({
         type: 'editConnection',
         config: {
@@ -1207,6 +1233,8 @@ export class WebviewPanelManager {
           endpointUrl: editConfig.endpointUrl,
           region: editConfig.region,
           sslVerification: editConfig.sslVerification,
+          gcsAuthType: editConfig.gcsAuthType,
+          projectId: editConfig.projectId,
         },
         hasSavedCredentials,
       });
@@ -1372,12 +1400,15 @@ export class WebviewPanelManager {
     if (segmentIndex >= breadcrumbs.length - 1) { return; }
 
     // Normalise Hadoop variants and split into real path components.
-    const normalised = resourcePath.replace(/\\/g, '/').replace(/^s3[an]:\/\//, 's3://');
+    const normalised = resourcePath.replace(/\\/g, '/').replace(/^s3[an]:\/\//, 's3://').replace(/^gcs:\/\//, 'gs://');
     const isS3 = normalised.startsWith('s3://');
+    const isGcs = normalised.startsWith('gs://');
 
     let parts: string[];
     if (isS3) {
       parts = normalised.slice('s3://'.length).split('/').filter(Boolean);
+    } else if (isGcs) {
+      parts = normalised.slice('gs://'.length).split('/').filter(Boolean);
     } else {
       parts = normalised.split('/').filter(Boolean);
     }
@@ -1413,6 +1444,8 @@ export class WebviewPanelManager {
     const targetParts = parts.slice(0, endPartIndex + 1);
     const targetPath = isS3
       ? 's3://' + targetParts.join('/')
+      : isGcs
+      ? 'gs://' + targetParts.join('/')
       : '/' + targetParts.join('/');
 
     this.logger.info(`Breadcrumb navigate → resolved path: ${targetPath}`);

@@ -885,6 +885,122 @@ void (async () => {
     assert.strictEqual(typeof acceptRes, 'string', 'Expected saveConnection to succeed for s3://rk-iceberg/dogs');
   });
 
+  await run('saveConnection message with GCS connectionType and ADC succeeds and posts saveSuccess', async () => {
+    let savedConfig: any = null;
+    await withFakePanel(async ({ fireMessage, getMessages }) => {
+      const mgr = new WebviewPanelManager(
+        fakeContext,
+        fakeStorageAdapter,
+        testLogger,
+        undefined as any,
+        undefined,
+        undefined,
+      );
+
+      await mgr.openSettingsPanel(
+        undefined,
+        async (config) => { savedConfig = config; },
+        noopActivateConnection,
+        noopDeleteConnection,
+      );
+
+      await fireMessage({
+        type: 'saveConnection',
+        label: 'My GCS Warehouse',
+        connectionType: 'gcs',
+        warehousePath: 'gs://my-bucket/iceberg',
+        gcsAuthType: 'adc',
+        projectId: 'gcp-proj',
+      });
+
+      const msgs = getMessages();
+      const saveSuccess = msgs.find((m) => m.type === 'saveSuccess');
+      assert.ok(saveSuccess, 'saveSuccess message was posted');
+      assert.strictEqual(savedConfig.connectionType, 'gcs');
+      assert.strictEqual(savedConfig.warehousePath, 'gs://my-bucket/iceberg');
+      assert.strictEqual(savedConfig.gcsAuthType, 'adc');
+      assert.strictEqual(savedConfig.projectId, 'gcp-proj');
+    });
+  });
+
+  await run('WebviewPanelManager.openSettingsPanel sends editConnection with GCS configuration and hasSavedCredentials=true for ADC', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const mgr = new WebviewPanelManager(
+        fakeContext,
+        fakeStorageAdapter,
+        testLogger,
+        undefined as any,
+        undefined,
+        undefined,
+      );
+
+      const editConfig: ConnectionConfig = {
+        id: 'conn-gcs-1',
+        label: 'My GCS',
+        connectionType: 'gcs',
+        warehousePath: 'gs://gcs-bucket/wh',
+        sslVerification: true,
+        gcsAuthType: 'adc',
+        projectId: 'demo-p',
+        savedAt: 12345,
+      };
+
+      await mgr.openSettingsPanel(
+        editConfig,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        undefined,
+        async (id) => id === 'conn-gcs-1',
+      );
+
+      const msgs = getMessages();
+      const editMsg = msgs.find((m) => m.type === 'editConnection');
+      assert.ok(editMsg, `expected editConnection in messages: ${JSON.stringify(msgs)}`);
+      assert.strictEqual(editMsg!.hasSavedCredentials, false); // ADC does not require stored credentials
+      assert.strictEqual((editMsg!.config as any).connectionType, 'gcs');
+      assert.strictEqual((editMsg!.config as any).gcsAuthType, 'adc');
+      assert.strictEqual((editMsg!.config as any).projectId, 'demo-p');
+    });
+  });
+
+  await run('WebviewPanelManager.openSettingsPanel sends editConnection with hasSavedCredentials=true for GCS serviceAccountKey', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const mgr = new WebviewPanelManager(
+        fakeContext,
+        fakeStorageAdapter,
+        testLogger,
+        undefined as any,
+        undefined,
+        undefined,
+      );
+
+      const editConfig: ConnectionConfig = {
+        id: 'conn-gcs-sa',
+        label: 'My GCS SA',
+        connectionType: 'gcs',
+        warehousePath: 'gs://gcs-bucket/wh',
+        sslVerification: true,
+        gcsAuthType: 'serviceAccountKey',
+        savedAt: 12345,
+      };
+
+      await mgr.openSettingsPanel(
+        editConfig,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        undefined,
+        async (id) => id === 'conn-gcs-sa',
+      );
+
+      const msgs = getMessages();
+      const editMsg = msgs.find((m) => m.type === 'editConnection');
+      assert.ok(editMsg, `expected editConnection in messages: ${JSON.stringify(msgs)}`);
+      assert.strictEqual(editMsg!.hasSavedCredentials, true);
+    });
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

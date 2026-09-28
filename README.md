@@ -1,6 +1,6 @@
 # Iceberg Explorer — VS Code Extension
 
-Browse Apache Iceberg warehouses stored in S3-compatible object storage or on the local file system, directly from VS Code.
+Browse Apache Iceberg warehouses stored in Google Cloud Storage (GCS), S3-compatible object storage, or on the local file system, directly from VS Code.
 
 > **MVP platform:** macOS arm64 only. The extension will not activate on other architectures.
 
@@ -118,10 +118,11 @@ iceberg-explorer/
 │   │   ├── types.ts
 │   │   ├── validation.ts
 │   │   └── index.ts
-│   └── storage/           # Storage Layer — S3 and local FS adapters
+│   └── storage/           # Storage Layer — S3, GCS, and local FS adapters
 │       ├── StorageAdapter.ts
 │       ├── localFsAdapter.ts
 │       ├── s3Adapter.ts
+│       ├── gcsAdapter.ts
 │       ├── errors.ts
 │       ├── types.ts
 │       └── index.ts
@@ -142,14 +143,13 @@ iceberg-explorer/
 
 ---
 
-## Current scope (this slice)
+## Features & Scope
 
-This build implements the **Connection Manager + Storage Layer foundation** only:
-
-- Save and activate S3 / local FS connections
-- Credentials stored exclusively in VS Code `SecretStorage` (macOS Keychain-backed)
-- Non-secret config persisted in `globalState` with a 5-connection LRU cap
-- Common `StorageAdapter` interface over `LocalFsAdapter` and `S3Adapter`
+- Save and activate S3, Google Cloud Storage (GCS), and local FS connections
+- Native GCS authentication: Application Default Credentials (ADC) / `gcloud` (zero config) and Service Account Key
+- Credentials stored exclusively in VS Code `SecretStorage` (Keychain-backed)
+- Non-secret config persisted in `globalState` with an LRU cap
+- Common `StorageAdapter` interface over `LocalFsAdapter`, `S3Adapter`, and `GcsAdapter`
 
 The following are **not yet implemented** (deferred to later slices):
 
