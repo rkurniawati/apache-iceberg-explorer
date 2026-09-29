@@ -1442,10 +1442,16 @@ export class WebviewPanelManager {
     if (endPartIndex < 0 || endPartIndex >= parts.length) { return; }
 
     const targetParts = parts.slice(0, endPartIndex + 1);
-    const targetPath = isS3
+    const targetPath = (handle?.connectionType === 'gcs')
+      ? 'gs://' + targetParts.join('/')
+      : (handle?.connectionType === 's3')
       ? 's3://' + targetParts.join('/')
+      : (handle?.connectionType === 'local')
+      ? '/' + targetParts.join('/')
       : isGcs
       ? 'gs://' + targetParts.join('/')
+      : isS3
+      ? 's3://' + targetParts.join('/')
       : '/' + targetParts.join('/');
 
     this.logger.info(`Breadcrumb navigate → resolved path: ${targetPath}`);

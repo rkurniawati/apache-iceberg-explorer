@@ -389,14 +389,21 @@ function normalisePrefix(prefix: string): string {
 }
 
 /**
- * Parses a GCS URI and returns the key portion.
- * Normalises gcs:// to gs:// before stripping the scheme+bucket prefix.
- * e.g. "gs://bucket/prefix/key" → "prefix/key"
+ * Parses a cloud storage URI or relative path and returns the object key.
+ * Supports gs://, gcs://, s3://, s3a://, s3n:// schemes (e.g. when tables
+ * are created via GCS S3 interoperability or migrated between clouds)
+ * as well as plain keys.
+ * e.g. "gs://bucket/prefix/key"  → "prefix/key"
+ *      "s3a://bucket/prefix/key" → "prefix/key"
+ *      "s3://bucket/prefix/key"  → "prefix/key"
  */
 function gcsUriToKey(uri: string): string {
-  const normalised = uri.replace(/^gcs:\/\//, 'gs://');
-  const match = /^gs:\/\/[^/]+(?:\/(.*))?$/.exec(normalised);
-  return match && match[1] !== undefined ? match[1] : '';
+  const match = /^(?:gs|gcs|s3[an]?):\/\/[^/]+(?:\/(.*))?$/.exec(uri);
+  if (match) {
+    return match[1] !== undefined ? match[1] : '';
+  }
+  const withoutFile = uri.replace(/^file:\/\//, '');
+  return withoutFile.replace(/^\/+/, '');
 }
 
 /**
