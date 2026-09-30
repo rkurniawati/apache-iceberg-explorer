@@ -340,6 +340,19 @@ void (async () => {
     await adapter.deleteTemp(tempFile);
     await assert.rejects(async () => fs.access(tempFile));
 
+    // fetchFileToTemp with s3:// and s3a:// URI prefixes (e.g. from GCS S3 interop or migration)
+    const s3TempFile = await adapter.fetchFileToTemp(handle, 's3://iceberg-bucket/warehouse/db1/tableA/data.parquet');
+    assert.ok(typeof s3TempFile === 'string');
+    await adapter.deleteTemp(s3TempFile);
+
+    const s3aTempFile = await adapter.fetchFileToTemp(handle, 's3a://iceberg-bucket/warehouse/db1/tableA/data.parquet');
+    assert.ok(typeof s3aTempFile === 'string');
+    await adapter.deleteTemp(s3aTempFile);
+
+    // fetchMetadataJson with s3:// URI prefix
+    const s3MetaJson: any = await adapter.fetchMetadataJson(handle, 's3://iceberg-bucket/warehouse/db1/tableA/metadata/v2.metadata.json');
+    assert.strictEqual(s3MetaJson.formatVersion, 2);
+
     // listDirectoryContents
     const contents = await adapter.listDirectoryContents(handle, 'gs://iceberg-bucket/warehouse/db1/tableA');
     assert.ok(!('kind' in contents));

@@ -365,16 +365,19 @@ function normalisePrefix(prefix: string): string {
 }
 
 /**
- * Parses an S3 URI and returns the key portion.
- * Normalises s3a:// and s3n:// (Hadoop-style schemes written by Trino/Spark)
- * to s3:// before stripping the scheme+bucket prefix.
+ * Parses a cloud storage URI or relative path and returns the object key.
+ * Supports s3://, s3a://, s3n://, gs://, gcs:// schemes as well as plain keys.
  * e.g. "s3a://bucket/prefix/key" → "prefix/key"
  *      "s3://bucket/prefix/key"  → "prefix/key"
+ *      "gs://bucket/prefix/key"  → "prefix/key"
  */
 function s3UriToKey(uri: string): string {
-  const normalised = uri.replace(/^s3[an]:\/\//, 's3://');
-  const match = /^s3:\/\/[^/]+(?:\/(.*))?$/.exec(normalised);
-  return match && match[1] !== undefined ? match[1] : '';
+  const match = /^(?:s3[an]?|gs|gcs):\/\/[^/]+(?:\/(.*))?$/.exec(uri);
+  if (match) {
+    return match[1] !== undefined ? match[1] : '';
+  }
+  const withoutFile = uri.replace(/^file:\/\//, '');
+  return withoutFile.replace(/^\/+/, '');
 }
 
 /**

@@ -384,7 +384,7 @@ export function getMetadataDetailHtml(
   }
 
   function resourcePathToBreadcrumbs(resourcePath) {
-    var normalised = resourcePath.replace(/\\\\/g, '/').replace(/^gcs:\/\//, 'gs://');
+    var normalised = resourcePath.replace(/\\\\/g, '/').replace(/^s3[an]:\/\//, 's3://').replace(/^gcs:\/\//, 'gs://');
     var parts;
     if (normalised.startsWith('s3://') || normalised.startsWith('gs://')) {
       var schemeLen = normalised.startsWith('s3://') ? 's3://'.length : 'gs://'.length;
