@@ -758,6 +758,36 @@ async function runTests() {
     assert.strictEqual(res.accumulatedBytes, 50 * 1024 * 1024);
   });
 
+  await test('Ad-hoc query resolution: aborts early on schema mismatch before fetching manifests or parquet files', async () => {
+    const logger = makeLogger();
+    let tempFilesFetched = 0;
+    const adapter = makeStorageAdapter({
+      async fetchFileToTemp() {
+        tempFilesFetched++;
+        return '/tmp/manifest.avro';
+      },
+    });
+    const qe = makeQueryEngine({
+      async validateQuery(_sql: string, columns: any[]) {
+        assert.ok(columns.length > 0, 'Schema columns should be passed to validateQuery');
+        return { kind: 'QueryError', class: 'internal', message: 'Binder Error: Referenced column "applicationid" not found' };
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    const res = await (manager as any).resolveTableParquetFiles(
+      handle,
+      's3://warehouse/db/events',
+      adapter,
+      'SELECT * FROM data WHERE applicationid = 1',
+    );
+
+    assert.ok(typeof res !== 'string');
+    assert.strictEqual((res as any).kind, 'QueryError', 'Should return QueryError');
+    assert.ok((res as any).message.includes('applicationid'));
+    assert.strictEqual(tempFilesFetched, 0, 'Should not fetch any manifest or parquet files');
+  });
+
   await test('Ad-hoc query panel: displays informative sampling and limit banner in webview', async () => {
     const logger = makeLogger();
     const adapter = makeStorageAdapter({

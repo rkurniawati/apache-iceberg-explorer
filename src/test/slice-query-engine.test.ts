@@ -261,6 +261,49 @@ void (async () => {
     assert.ok(result.message.includes('DuckDB WASM files missing'), `Expected error message to mention missing files, got: ${result.message}`);
   });
 
+  // ── 11: validateQuery pre-flight checks ─────────────────────────────────────
+
+  await run('validateQuery: valid query against schema returns null', async () => {
+    const engine = new QueryEngine(testLogger, testExtensionUri);
+    const columns = [
+      { name: 'applicationeventid', type: 'long' },
+      { name: 'applicationeventdateutc', type: 'timestamp' },
+      { name: 'applicationeventtype', type: 'string' },
+    ];
+    const res = await engine.validateQuery('SELECT applicationeventid FROM data WHERE applicationeventid > 10 LIMIT 5', columns);
+    assert.strictEqual(res, null, 'Expected null for valid query');
+  });
+
+  await run('validateQuery: non-existent column returns Binder Error with candidates without downloading data', async () => {
+    const engine = new QueryEngine(testLogger, testExtensionUri);
+    const columns = [
+      { name: 'applicationeventid', type: 'long' },
+      { name: 'applicationeventdateutc', type: 'timestamp' },
+      { name: 'applicationeventtype', type: 'string' },
+    ];
+    const res = await engine.validateQuery('SELECT * FROM data WHERE applicationid = 5582550424770400000 LIMIT 10;', columns);
+    assert.ok(isQueryError(res), 'Expected QueryError for missing column');
+    assert.strictEqual(res.class, 'internal');
+    assert.ok(res.message.includes('applicationid'), `Expected message to mention applicationid, got: ${res.message}`);
+    assert.ok(res.message.includes('Candidate bindings:'), `Expected candidate bindings, got: ${res.message}`);
+  });
+
+  await run('validateQuery: supports table name alias', async () => {
+    const engine = new QueryEngine(testLogger, testExtensionUri);
+    const columns = [
+      { name: 'applicationeventid', type: 'long' },
+    ];
+    const res = await engine.validateQuery('SELECT * FROM events WHERE applicationeventid = 1', columns, 'events');
+    assert.strictEqual(res, null, 'Expected null when query uses table name');
+  });
+
+  await run('validateQuery: empty SQL returns QueryError(internal)', async () => {
+    const engine = new QueryEngine(testLogger, testExtensionUri);
+    const res = await engine.validateQuery('   ', [{ name: 'id', type: 'int' }]);
+    assert.ok(isQueryError(res));
+    assert.strictEqual(res.message, 'Query cannot be empty.');
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

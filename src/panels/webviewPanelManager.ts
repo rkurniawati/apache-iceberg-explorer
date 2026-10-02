@@ -39,7 +39,7 @@ import type {
   ManifestDataFileEntry,
 } from './messages.js';
 import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
-import type { QueryEngine, ManifestEntryRow, DataFileRow } from '../query/index.js';
+import type { QueryEngine, ManifestEntryRow, DataFileRow, QueryError } from '../query/index.js';
 import { isQueryError } from '../query/index.js';
 import { analyzeQuery } from '../query/sqlAnalyzer.js';
 
@@ -70,6 +70,7 @@ export interface ResolvedTableParquet {
   isSampled: boolean;
   requestedLimit?: number;
   isSimpleScan: boolean;
+  columns?: Array<{ name: string; type?: unknown }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -776,6 +777,11 @@ export class WebviewPanelManager {
     let resolveDetails: ResolvedTableParquet | undefined;
 
     if (resourcePath.toLowerCase().endsWith('.parquet')) {
+      if (!sql.trim()) {
+        gate.post({ type: 'setState', state: 'error', errorClass: 'internal', message: 'Query cannot be empty.' });
+        this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} errorClass=internal error=Query cannot be empty.`);
+        return;
+      }
       parquetPathsToFetch = [resourcePath];
     } else {
       tableName = lastPathSegment(resourcePath).replace(/[^a-zA-Z0-9_]/g, '_');
@@ -788,6 +794,12 @@ export class WebviewPanelManager {
           message: resolveResult,
         });
         this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} error=${resolveResult}`);
+        return;
+      }
+      if (isQueryError(resolveResult)) {
+        const msg = resolveResult.message || (QUERY_ERROR_MESSAGES[resolveResult.class] ?? QUERY_ERROR_MESSAGES['internal']);
+        gate.post({ type: 'setState', state: 'error', errorClass: resolveResult.class, message: msg });
+        this.logger.error(`Panel error: type=adHocQuery resource=${resourcePath} errorClass=${resolveResult.class} error=${msg}`);
         return;
       }
       parquetPathsToFetch = resolveResult.parquetPaths;
@@ -869,7 +881,7 @@ export class WebviewPanelManager {
     tablePath: string,
     adapter: StorageAdapter,
     sql?: string,
-  ): Promise<ResolvedTableParquet | string> {
+  ): Promise<ResolvedTableParquet | QueryError | string> {
     const engine = this.queryEngine;
     if (!engine) {
       return 'Query engine not available.';
@@ -912,8 +924,28 @@ export class WebviewPanelManager {
       return `Could not read table metadata: ${metaJson.message}`;
     }
 
-    // 3. Find current snapshot
     const metaObj = metaJson as Record<string, unknown>;
+
+    // 2b. Extract schema columns & run pre-flight query validation before touching manifests or parquet files
+    const currentSchemaId = metaObj['current-schema-id'];
+    const schemas = Array.isArray(metaObj['schemas']) ? metaObj['schemas'] : [];
+    const currentSchema = (schemas.find((s: any) => s['schema-id'] === currentSchemaId) ?? metaObj['schema'] ?? schemas[0]) as Record<string, unknown> | undefined;
+    const fields = Array.isArray(currentSchema?.fields) ? currentSchema.fields : [];
+    const columns: Array<{ name: string; type?: unknown }> = fields.map((f: any) => ({
+      name: String(f.name ?? ''),
+      type: f.type,
+    }));
+
+    const tableNameForQuery = lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_');
+
+    if (sql && columns.length > 0 && typeof (engine as any).validateQuery === 'function') {
+      const valErr = await (engine as any).validateQuery(sql, columns, tableNameForQuery);
+      if (isQueryError(valErr)) {
+        return valErr;
+      }
+    }
+
+    // 3. Find current snapshot
     const currentSnapshotId = metaObj['current-snapshot-id'];
     const snapshots = (metaObj.snapshots ?? []) as Array<Record<string, unknown>>;
     const snapshot = snapshots.find(s => s['snapshot-id'] === currentSnapshotId) ?? snapshots[snapshots.length - 1];
@@ -1047,6 +1079,7 @@ export class WebviewPanelManager {
       isSampled,
       requestedLimit: analysis.requestedLimit,
       isSimpleScan: analysis.isSimpleScan,
+      columns,
     };
   }
 

@@ -4,7 +4,7 @@
  * All consumers (Webview Panel Manager, tests) should import from this file only.
  */
 
-export { QueryEngine } from './queryEngine.js';
+export { QueryEngine, icebergTypeToDuckDB } from './queryEngine.js';
 export {
   type QueryErrorClass,
   type QueryError,

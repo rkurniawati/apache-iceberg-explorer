@@ -98,6 +98,43 @@ function classifyDuckDBError(raw: unknown): QueryError {
   return queryError('internal', 'An unexpected query error occurred.');
 }
 
+/** Maps an Iceberg schema type (string or nested object) to a DuckDB SQL type string. */
+export function icebergTypeToDuckDB(type: unknown): string {
+  if (typeof type === 'string') {
+    const t = type.toLowerCase().trim();
+    if (t === 'boolean') { return 'BOOLEAN'; }
+    if (t === 'int' || t === 'integer') { return 'INTEGER'; }
+    if (t === 'long') { return 'BIGINT'; }
+    if (t === 'float') { return 'FLOAT'; }
+    if (t === 'double') { return 'DOUBLE'; }
+    if (t === 'date') { return 'DATE'; }
+    if (t === 'time') { return 'TIME'; }
+    if (t === 'timestamp' || t === 'timestamp-without-timezone') { return 'TIMESTAMP'; }
+    if (t === 'timestamptz' || t === 'timestamp-with-timezone') { return 'TIMESTAMPTZ'; }
+    if (t === 'string') { return 'VARCHAR'; }
+    if (t === 'uuid') { return 'UUID'; }
+    if (t === 'binary' || t.startsWith('fixed')) { return 'BLOB'; }
+    if (t.startsWith('decimal')) { return t.toUpperCase(); }
+    return 'VARCHAR';
+  }
+  if (typeof type === 'object' && type !== null) {
+    const obj = type as Record<string, unknown>;
+    if (obj['type'] === 'list' && obj['element']) {
+      return `${icebergTypeToDuckDB(obj['element'])}[]`;
+    }
+    if (obj['type'] === 'map' && obj['key'] && obj['value']) {
+      return `MAP(${icebergTypeToDuckDB(obj['key'])}, ${icebergTypeToDuckDB(obj['value'])})`;
+    }
+    if (obj['type'] === 'struct' && Array.isArray(obj['fields'])) {
+      const inner = (obj['fields'] as Array<{ name: string; type: unknown }>)
+        .map((f) => `"${String(f.name).replace(/"/g, '""')}" ${icebergTypeToDuckDB(f.type)}`)
+        .join(', ');
+      return `STRUCT(${inner})`;
+    }
+  }
+  return 'VARCHAR';
+}
+
 // ---------------------------------------------------------------------------
 // Avro BigInt Long Type
 // ---------------------------------------------------------------------------
@@ -641,7 +678,7 @@ export class QueryEngine {
     let finalSql = sql;
     const hasLimit = /\bLIMIT\b/i.test(finalSql);
     if (!hasLimit) {
-      finalSql = `${finalSql}\nLIMIT ${ADHOC_LIMIT}`;
+      finalSql = `${finalSql.trim().replace(/;+\s*$/, '')}\nLIMIT ${ADHOC_LIMIT}`;
       this.logger.warn(`Row cap applied: limit=${ADHOC_LIMIT}`);
     }
 
@@ -664,6 +701,69 @@ export class QueryEngine {
       };
     } catch (err: unknown) {
       return this.handleQueryError(err);
+    }
+  }
+
+  /**
+   * Pre-flight validation of an ad-hoc SQL query against a table schema.
+   * Runs in-memory with DuckDB WASM without reading or downloading any Parquet files.
+   * Returns `null` if the query is valid, or `QueryError` if invalid (e.g. non-existent column, syntax error).
+   */
+  async validateQuery(
+    sql: string,
+    columns?: Array<{ name: string; type?: unknown }>,
+    tableName?: string,
+  ): Promise<QueryError | null> {
+    if (!sql || !sql.trim()) {
+      return queryError('internal', 'Query cannot be empty.');
+    }
+
+    if (!columns || columns.length === 0) {
+      return null;
+    }
+
+    let finalSql = sql;
+    const hasLimit = /\bLIMIT\b/i.test(finalSql);
+    if (!hasLimit) {
+      finalSql = `${finalSql.trim().replace(/;+\s*$/, '')}\nLIMIT ${ADHOC_LIMIT}`;
+    }
+
+    const db = await this.getInstance();
+    const conn = await db.connect();
+    this.currentConnection = conn;
+    this.pendingCancelReason = null;
+
+    const sanitizedTable = tableName?.replace(/[^a-zA-Z0-9_]/g, '_');
+
+    try {
+      const typedCols = columns
+        .map((c) => `CAST(NULL AS ${icebergTypeToDuckDB(c.type)}) AS "${c.name.replace(/"/g, '""')}"`)
+        .join(', ');
+
+      try {
+        await conn.query(`CREATE OR REPLACE TEMPORARY VIEW data AS SELECT ${typedCols} WHERE 1 = 0`);
+      } catch {
+        const varcharCols = columns
+          .map((c) => `CAST(NULL AS VARCHAR) AS "${c.name.replace(/"/g, '""')}"`)
+          .join(', ');
+        await conn.query(`CREATE OR REPLACE TEMPORARY VIEW data AS SELECT ${varcharCols} WHERE 1 = 0`);
+      }
+
+      if (sanitizedTable && sanitizedTable !== 'data') {
+        await conn.query(`CREATE OR REPLACE TEMPORARY VIEW "${sanitizedTable}" AS SELECT * FROM data`);
+      }
+
+      await conn.query(finalSql);
+      return null;
+    } catch (err: unknown) {
+      return this.handleQueryError(err);
+    } finally {
+      this.currentConnection = null;
+      try { await conn.query('DROP VIEW IF EXISTS data'); } catch { /* ignore */ }
+      if (sanitizedTable && sanitizedTable !== 'data') {
+        try { await conn.query(`DROP VIEW IF EXISTS "${sanitizedTable}"`); } catch { /* ignore */ }
+      }
+      try { await conn.close(); } catch { /* ignore */ }
     }
   }
 
