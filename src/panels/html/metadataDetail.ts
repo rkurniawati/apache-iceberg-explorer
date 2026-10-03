@@ -344,11 +344,20 @@ export function getMetadataDetailHtml(
 
       case 'loadMetadata':
         vscode.setState({ type: 'loadMetadata', payload: msg.payload, resourcePath: msg.resourcePath });
-        renderAll(msg.payload, msg.resourcePath);
-        setState('loaded');
+        try {
+          renderAll(msg.payload, msg.resourcePath);
+          setState('loaded');
+        } catch (err) {
+          console.error('Failed to render metadata detail:', err);
+          elErrorMsg.textContent = 'Failed to display metadata details.';
+          setState('error');
+        }
         break;
     }
   });
+
+  // Signal readiness now that the message listener is registered (MEDIUM-1)
+  vscode.postMessage({ type: 'webviewReady' });
 
   // ── Breadcrumb rendering (FR-18, T-27) ──────────────────────────────────
 
@@ -384,7 +393,7 @@ export function getMetadataDetailHtml(
   }
 
   function resourcePathToBreadcrumbs(resourcePath) {
-    var normalised = resourcePath.replace(/\\\\/g, '/').replace(/^s3[an]:\/\//, 's3://').replace(/^gcs:\/\//, 'gs://');
+    var normalised = resourcePath.split('\\\\').join('/').replace(new RegExp('^s3[an]?://', 'i'), 's3://').replace(new RegExp('^gcs://', 'i'), 'gs://');
     var parts;
     if (normalised.startsWith('s3://') || normalised.startsWith('gs://')) {
       var schemeLen = normalised.startsWith('s3://') ? 's3://'.length : 'gs://'.length;
@@ -778,10 +787,6 @@ export function getMetadataDetailHtml(
     html += tableClose() + '</div>';
     el.innerHTML = html;
   }
-
-  // Signal readiness only after the message listener is registered so the
-  // host's response cannot arrive before we can receive it. (MEDIUM-1)
-  vscode.postMessage({ type: 'webviewReady' });
 
 }());
 </script>

@@ -12,12 +12,15 @@ import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import * as vm from 'node:vm';
+
 import type { StorageAdapter } from '../storage/StorageAdapter';
 import type { ActiveConnectionHandle } from '../storage/types';
 import { storageError, isStorageError, type StorageError } from '../storage/errors';
 import type { ILogger } from '../extension';
 import { WebviewPanelManager } from '../panels/webviewPanelManager';
 import { omitAbsent, lastPathSegment, resourcePathToBreadcrumbs } from '../panels/utils';
+import { getMetadataDetailHtml } from '../panels/html/metadataDetail';
 
 // ---------------------------------------------------------------------------
 // Fixtures directory — use __dirname (CJS-compatible with Node16 module mode)
@@ -375,6 +378,18 @@ void (async () => {
     const stackLines = errorLines.filter(l => / at [A-Za-z]/.test(l) && l.includes('.ts:'));
     assert.strictEqual(stackLines.length, 0,
       `Stack traces found in error logs:\n${stackLines.join('\n')}`);
+  });
+
+  await run('getMetadataDetailHtml script compiles without syntax errors and contains webviewReady', () => {
+    const html = getMetadataDetailHtml('test-nonce', 'vscode-resource:');
+    const scriptMatch = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch, 'Inline script tag must exist');
+    const scriptCode = scriptMatch[1];
+    assert.ok(scriptCode.includes("vscode.postMessage({ type: 'webviewReady' })"), 'Script must signal webviewReady');
+    // Ensure script compiles with zero syntax errors (guards against template literal escaping bugs)
+    assert.doesNotThrow(() => {
+      new vm.Script(scriptCode);
+    }, 'Inline script must parse cleanly in JavaScript engine');
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

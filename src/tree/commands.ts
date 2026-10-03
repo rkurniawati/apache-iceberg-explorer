@@ -37,15 +37,20 @@ export function registerTreeCommands(
 ): void {
 
   // ── icebergExplorer.openMetadataPanel ────────────────────────────────────
-  // Arguments: [resourcePath: string, handle: ActiveConnectionHandle]
+  // Arguments: [resourcePath: string, handle?: ActiveConnectionHandle]
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'icebergExplorer.openMetadataPanel',
-      (resourcePath: string, handle: ActiveConnectionHandle) => {
+      (resourcePath: string, handle?: ActiveConnectionHandle) => {
         logger.info(
           `openMetadataPanel command: resource=${resourcePath}`,
         );
-        void panelManager.openMetadataDetailPanel(resourcePath, handle, provider.getStorageAdapter());
+        const effectiveHandle = handle ?? provider.getActiveHandle();
+        if (!effectiveHandle) {
+          logger.warn('openMetadataPanel: no active connection handle — ignoring');
+          return;
+        }
+        void panelManager.openMetadataDetailPanel(resourcePath, effectiveHandle, provider.getStorageAdapter());
       },
     ),
   );

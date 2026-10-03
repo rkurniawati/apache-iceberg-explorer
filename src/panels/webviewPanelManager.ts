@@ -111,13 +111,14 @@ class WebviewReadyGate {
   onHostMessage(msg: unknown): boolean {
     if ((msg as { type?: string })?.type === 'webviewReady') {
       this.ready = true;
-      if (this.lastTerminalMessage) {
+      if (this.queue.length > 0) {
+        for (const queued of this.queue) {
+          void this.panel.webview.postMessage(queued);
+        }
+        this.queue = [];
+      } else if (this.lastTerminalMessage) {
         void this.panel.webview.postMessage(this.lastTerminalMessage);
       }
-      for (const queued of this.queue) {
-        void this.panel.webview.postMessage(queued);
-      }
-      this.queue = [];
       return true;
     }
     return false;
