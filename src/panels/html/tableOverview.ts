@@ -321,6 +321,9 @@ export function getTableOverviewHtml(
 
     <!-- Tab: View SQL (Visible for Iceberg Views) -->
     <div id="tab-sql" class="tab-content" style="display: none;">
+      <div style="margin-bottom: 0.75rem; padding: 0.5rem 0.75rem; background: var(--vscode-editorWidget-background); border: 1px solid var(--vscode-editorWidget-border); border-radius: 4px; font-size: 0.85rem; color: var(--vscode-descriptionForeground);">
+        ℹ️ <strong>Apache Iceberg View</strong>: Views are metadata-only definitions containing a SQL query. They do not store physical data snapshots. You can copy the SQL query below to execute in your external query engine (such as Trino or Spark).
+      </div>
       <div class="filter-bar">
         <div><strong>Dialect:</strong> <span class="badge" id="view-dialect-badge" style="background: #0284c7; color: #fff;">TRINO</span></div>
         <button class="btn btn-secondary" id="copy-sql-btn">📋 Copy SQL</button>
@@ -609,9 +612,12 @@ export function getTableOverviewHtml(
           vBadge.style.background = '#0284c7';
           vBadge.style.color = '#fff';
 
+          // Views are metadata-only objects; querying and data previews are not applicable
+          document.getElementById('query-btn').style.display = 'none';
           document.getElementById('view-dag-btn').style.display = 'none';
           document.getElementById('item-current-snapshot').style.display = 'none';
           document.getElementById('partition-section').style.display = 'none';
+          document.getElementById('tab-btn-preview').style.display = 'none';
 
           document.getElementById('item-view-uuid').style.display = 'inline';
           document.getElementById('view-uuid').textContent = msg.viewUuid || msg.tableUuid;
@@ -636,15 +642,26 @@ export function getTableOverviewHtml(
           document.getElementById('tab-btn-snapshots').textContent = 'Versions & History';
           document.getElementById('view-sql-code').textContent = msg.viewSql || 'No SQL definition available.';
           document.getElementById('view-dialect-badge').textContent = (msg.viewDialect || 'sql').toUpperCase();
+
+          // If current tab is preview, switch to View SQL tab
+          const activeTabBtn = document.querySelector('.tab-btn.active');
+          if (activeTabBtn && activeTabBtn.getAttribute('data-tab') === 'preview') {
+            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            document.getElementById('tab-btn-sql').classList.add('active');
+            document.getElementById('tab-sql').classList.add('active');
+          }
         } else {
           vBadge.textContent = 'v' + msg.formatVersion;
           vBadge.className = 'badge badge-v' + msg.formatVersion;
           vBadge.style.background = '';
           vBadge.style.color = '';
 
+          document.getElementById('query-btn').style.display = 'inline-flex';
           document.getElementById('view-dag-btn').style.display = 'inline-flex';
           document.getElementById('item-current-snapshot').style.display = 'inline';
           document.getElementById('partition-section').style.display = 'block';
+          document.getElementById('tab-btn-preview').style.display = 'inline-block';
 
           document.getElementById('item-view-uuid').style.display = 'none';
           document.getElementById('item-current-version').style.display = 'none';

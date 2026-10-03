@@ -6,9 +6,9 @@
  * 2. SQL table reference extraction (extractTableReferencesFromSql)
  * 3. View metadata normalization (extractIcebergViewDetails)
  * 4. Tree item creation (makeViewItem)
- * 5. DuckDB WASM view query execution (with underlying table & viewSql)
- * 6. WebviewPanelManager Table/View Overview integration
- * 7. WebviewPanelManager underlying table resolution for views
+ * 5. Query rejection with helpful guidance (resolveTableParquetFiles)
+ * 6. WebviewPanelManager View Overview integration
+ * 7. WebviewPanelManager Data Preview rejection for views
  */
 
 import * as assert from 'node:assert';
@@ -23,7 +23,7 @@ import {
   extractIcebergViewDetails,
 } from '../utils/icebergView';
 import { makeViewItem } from '../tree/types';
-import { QueryEngine, isQueryError } from '../query/index';
+import { QueryEngine } from '../query/index';
 import { WebviewPanelManager } from '../panels/webviewPanelManager';
 import { PanelType, panelRegistryKey } from '../panels/types';
 import type { StorageAdapter } from '../storage/StorageAdapter';
@@ -39,7 +39,6 @@ const VIEW_METADATA_PATH = path.join(FIXTURE_DIR, 'view.metadata.json');
 const V1_METADATA_PATH = path.join(FIXTURE_DIR, 'v1.metadata.json');
 const V2_METADATA_PATH = path.join(FIXTURE_DIR, 'v2.metadata.json');
 const V3_METADATA_PATH = path.join(FIXTURE_DIR, 'v3.metadata.json');
-const SAMPLE_PARQUET = path.join(FIXTURE_DIR, 'sample.parquet');
 
 const testExtensionUri = { fsPath: path.resolve(__dirname, '../..') } as unknown as Uri;
 
@@ -178,62 +177,20 @@ void (async () => {
     assert.strictEqual(item.command?.command, 'icebergExplorer.openTableOverview');
   });
 
-  // ── 5. DuckDB WASM Query Engine on Views ──────────────────────────────────
+  // ── 5. View Query Rejection & Guidance ────────────────────────────────────
 
-  await run('QueryEngine: runs ad-hoc query against view using underlying table parquet', async () => {
-    clearLog();
-    const engine = new QueryEngine(testLogger, testExtensionUri);
-
-    // sample.parquet has columns [id: BIGINT, name: VARCHAR] with 3 rows:
-    // id: 1, 2, 3
-    const viewSql = 'SELECT id, name FROM events WHERE id > 1';
-
-    // 1) Querying the view directly via `SELECT * FROM data LIMIT 10`
-    const res1 = await engine.runAdHocQuery(
-      SAMPLE_PARQUET,
-      'SELECT * FROM data LIMIT 10;',
-      'events',
-      viewSql,
-      'exception_view',
-    );
-    assert.ok(!isQueryError(res1), `Expected QueryResult, got: ${JSON.stringify(res1)}`);
-    assert.strictEqual(res1.rowCount, 2, 'Expected 2 rows matching id > 1');
-    assert.deepStrictEqual(res1.columnNames, ['id', 'name']);
-
-    // 2) Querying via the view alias `SELECT * FROM exception_view`
-    const res2 = await engine.runAdHocQuery(
-      SAMPLE_PARQUET,
-      'SELECT * FROM exception_view;',
-      'events',
-      viewSql,
-      'exception_view',
-    );
-    assert.ok(!isQueryError(res2), `Expected QueryResult, got: ${JSON.stringify(res2)}`);
-    assert.strictEqual(res2.rowCount, 2, 'Expected 2 rows from view alias');
-
-    // 3) Querying the registered underlying table `SELECT * FROM events`
-    const res3 = await engine.runAdHocQuery(
-      SAMPLE_PARQUET,
-      'SELECT count(*) AS total FROM events;',
-      'events',
-      viewSql,
-      'exception_view',
-    );
-    assert.ok(!isQueryError(res3), `Expected QueryResult, got: ${JSON.stringify(res3)}`);
-    assert.strictEqual(Number(res3.rows[0].total), 3, 'Expected 3 total rows in events table');
-  });
-
-  // ── 6. Underlying Table Resolution ────────────────────────────────────────
-
-  await run('WebviewPanelManager: resolves underlying table path across namespaces', async () => {
-    const raw = JSON.parse(fs.readFileSync(VIEW_METADATA_PATH, 'utf8'));
-    const details = extractIcebergViewDetails(raw);
-
+  await run('WebviewPanelManager: resolveTableParquetFiles informs views are metadata-only', async () => {
+    const viewRaw = JSON.parse(fs.readFileSync(VIEW_METADATA_PATH, 'utf8'));
     const mockAdapter: Partial<StorageAdapter> = {
-      isTable: async (_h, candidatePath) => {
-        // In the user's directory tree, the underlying table is at s3a://ltr-test/datalake/events
-        return candidatePath === 's3a://ltr-test/datalake/events';
-      },
+      isTable: async () => true,
+      fetchMetadataJson: async () => viewRaw,
+      listMetadataVersions: async () => [
+        {
+          label: '00000.metadata.json',
+          resourcePath: 's3a://ltr-test/datalake.db/exception_view-9250e55228b0434080f83910c9a99d53/metadata/00000.metadata.json',
+          sortKey: 0,
+        },
+      ],
     };
 
     const handle: ActiveConnectionHandle = {
@@ -241,20 +198,22 @@ void (async () => {
       storageType: 's3-compatible',
     } as unknown as ActiveConnectionHandle;
 
-    const manager = new WebviewPanelManager(makeContext(), mockAdapter as StorageAdapter, testLogger);
+    const qe = new QueryEngine(testLogger, testExtensionUri);
+    const manager = new WebviewPanelManager(makeContext(), mockAdapter as StorageAdapter, testLogger, qe);
 
-    const resolved = await (manager as any).findViewUnderlyingTablePath(
+    const result = await (manager as any).resolveTableParquetFiles(
       handle,
       's3a://ltr-test/datalake.db/exception_view-9250e55228b0434080f83910c9a99d53',
-      details.referencedTables[0],
-      details.defaultNamespace,
       mockAdapter,
     );
 
-    assert.strictEqual(resolved, 's3a://ltr-test/datalake/events');
+    assert.strictEqual(typeof result, 'string');
+    assert.ok(result.includes('is an Apache Iceberg View'));
+    assert.ok(result.includes('references "events"'));
+    assert.ok(result.includes('metadata-only'));
   });
 
-  // ── 7. WebviewPanelManager View Overview ──────────────────────────────────
+  // ── 6. WebviewPanelManager View Overview ──────────────────────────────────
 
   await run('WebviewPanelManager: openTableOverviewPanel populates view properties without snapshot errors', async () => {
     clearLog();
@@ -298,6 +257,47 @@ void (async () => {
     assert.strictEqual(overviewMsg.snapshots.length, 0, 'views should have 0 snapshots');
     assert.strictEqual(overviewMsg.currentSnapshotId, null);
     assert.strictEqual(overviewMsg.columns.length, 33, 'schema should contain 33 fields from view');
+  });
+
+  // ── 7. WebviewPanelManager Data Preview Rejection ─────────────────────────
+
+  await run('WebviewPanelManager: loadDataPreview informs preview unavailable for views', async () => {
+    clearLog();
+    const viewRaw = JSON.parse(fs.readFileSync(VIEW_METADATA_PATH, 'utf8'));
+
+    const mockAdapter: Partial<StorageAdapter> = {
+      isTable: async () => true,
+      fetchMetadataJson: async () => viewRaw,
+      listMetadataVersions: async () => [
+        {
+          label: '00000.metadata.json',
+          resourcePath: 's3a://ltr-test/datalake.db/exception_view-9250e55228b0434080f83910c9a99d53/metadata/00000.metadata.json',
+          sortKey: 0,
+        },
+      ],
+      listTables: async () => [],
+    };
+
+    const mockHandle: ActiveConnectionHandle = {
+      warehousePath: 's3a://ltr-test',
+      storageType: 's3-compatible',
+    } as unknown as ActiveConnectionHandle;
+
+    const qe = new QueryEngine(testLogger, testExtensionUri);
+    const manager = new WebviewPanelManager(makeContext(), mockAdapter as StorageAdapter, testLogger, qe);
+    const messages: any[] = [];
+    const fakeGate = { post: (msg: any) => messages.push(msg) };
+
+    await (manager as any).loadDataPreview(
+      fakeGate,
+      's3a://ltr-test/datalake.db/exception_view-9250e55228b0434080f83910c9a99d53',
+      mockHandle,
+      mockAdapter as StorageAdapter,
+    );
+
+    const prevMsg = messages.find((m) => m.type === 'loadDataPreview');
+    assert.ok(prevMsg, 'loadDataPreview message should be posted');
+    assert.ok(prevMsg.error.includes('Data preview is not available for metadata-only views'));
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────
