@@ -254,14 +254,15 @@ export function getMetadataDetailHtml(
   </div>
 
   <!-- Populated by section renderers when state transitions to 'loaded' -->
-  <div id="content-area">
-    <div id="section-identity"     class="section"></div>
-    <div id="section-schemas"      class="section"></div>
-    <div id="section-partitioning" class="section"></div>
-    <div id="section-sort-orders"  class="section"></div>
-    <div id="section-snapshots"    class="section"></div>
-    <div id="section-refs"         class="section"></div>
-    <div id="section-properties"   class="section"></div>
+    <div id="section-identity"      class="section"></div>
+    <div id="section-view-sql"      class="section" style="display:none;"></div>
+    <div id="section-view-versions" class="section" style="display:none;"></div>
+    <div id="section-schemas"       class="section"></div>
+    <div id="section-partitioning"  class="section"></div>
+    <div id="section-sort-orders"   class="section"></div>
+    <div id="section-snapshots"     class="section"></div>
+    <div id="section-refs"          class="section"></div>
+    <div id="section-properties"    class="section"></div>
   </div>
 
 <script nonce="${nonce}">
@@ -433,6 +434,8 @@ export function getMetadataDetailHtml(
     renderBreadcrumb(resourcePath);
     renderFormatVersionBadge(payload);
     renderIdentity(payload);
+    renderViewSql(payload);
+    renderViewVersions(payload);
     renderSchemas(payload);
     renderPartitioning(payload);
     renderSortOrders(payload);
@@ -501,19 +504,31 @@ export function getMetadataDetailHtml(
 
   // ── T-19: Table Identity & Versioning ───────────────────────────────────
 
+  function isView(payload) {
+    return Boolean(
+      (typeof payload['view-uuid'] === 'string' && payload['view-uuid']) ||
+      (Array.isArray(payload.versions) && !payload['table-uuid'] && !payload.snapshots)
+    );
+  }
+
   function renderFormatVersionBadge(payload) {
     var fv = payload['format-version'];
     if (fv === undefined || fv === null) {
       elFmtBadge.style.display = 'none';
       return;
     }
-    elFmtBadge.textContent = 'Format version: ' + fv;
+    elFmtBadge.textContent = isView(payload) ? ('Format version: ' + fv + ' (View)') : ('Format version: ' + fv);
     elFmtBadge.style.display = 'inline-flex';
   }
 
   function renderIdentity(payload) {
     var el = document.getElementById('section-identity');
-    var fields = [
+    var isV = isView(payload);
+    var fields = isV ? [
+      { key: 'view-uuid',          label: 'View UUID' },
+      { key: 'location',           label: 'Location' },
+      { key: 'current-version-id', label: 'Current Version ID' },
+    ] : [
       { key: 'table-uuid',           label: 'Table UUID' },
       { key: 'location',             label: 'Location' },
       { key: 'last-updated-ms',      label: 'Last updated', fmt: formatMs },
@@ -530,11 +545,88 @@ export function getMetadataDetailHtml(
     });
 
     if (!rows) {
-      el.innerHTML = sectionHeading('Table Identity') + emptyMsg('No identity information available.');
+      el.innerHTML = sectionHeading(isV ? 'View Identity' : 'Table Identity') + emptyMsg('No identity information available.');
       return;
     }
-    el.innerHTML = sectionHeading('Table Identity')
+    el.innerHTML = sectionHeading(isV ? 'View Identity' : 'Table Identity')
       + '<dl class="kv-list">' + rows + '</dl>';
+  }
+
+  function renderViewSql(payload) {
+    var el = document.getElementById('section-view-sql');
+    if (!isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
+    var versions = Array.isArray(payload.versions) ? payload.versions : [];
+    var currentVerId = payload['current-version-id'];
+    var currentVer = versions.find(function(v) { return v['version-id'] === currentVerId; }) || versions[versions.length - 1];
+    var reps = Array.isArray(currentVer?.representations) ? currentVer.representations : [];
+    var sqlRep = reps.find(function(r) { return r.type === 'sql'; }) || reps[0];
+
+    var dialect = (sqlRep && sqlRep.dialect) ? sqlRep.dialect : 'trino';
+    var sql = (sqlRep && sqlRep.sql) ? sqlRep.sql : '';
+    var defaultCatalog = currentVer ? currentVer['default-catalog'] : undefined;
+    var defaultNs = (currentVer && Array.isArray(currentVer['default-namespace'])) ? currentVer['default-namespace'].join('.') : '';
+
+    var infoHtml = '<div style="margin-bottom: 0.75rem; color: var(--vscode-descriptionForeground); font-size: 0.85rem;">';
+    infoHtml += '<strong>Dialect:</strong> <span class="badge-active" style="margin-right: 1rem;">' + esc(dialect.toUpperCase()) + '</span>';
+    if (defaultCatalog) {
+      infoHtml += '<strong>Catalog:</strong> ' + esc(defaultCatalog) + ' &nbsp;|&nbsp; ';
+    }
+    if (defaultNs) {
+      infoHtml += '<strong>Namespace:</strong> ' + esc(defaultNs);
+    }
+    infoHtml += '</div>';
+
+    var sqlBox = '<pre style="background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border); padding: 0.8rem; border-radius: 3px; overflow: auto; max-height: 400px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; line-height: 1.5;"><code>'
+      + esc(sql)
+      + '</code></pre>';
+
+    el.innerHTML = sectionHeading('View SQL Definition') + infoHtml + sqlBox;
+  }
+
+  function renderViewVersions(payload) {
+    var el = document.getElementById('section-view-versions');
+    if (!isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
+    var versions = Array.isArray(payload.versions) ? payload.versions : [];
+    if (versions.length === 0) {
+      el.innerHTML = sectionHeading('View Versions') + emptyMsg('No version history.');
+      return;
+    }
+
+    var currentVerId = payload['current-version-id'];
+    var html = sectionHeading('View Versions')
+      + '<div class="table-scroll">'
+      + tableHeader(['Version ID', 'Timestamp', 'Schema ID', 'Dialect', 'Iceberg Version / Summary']);
+
+    versions.forEach(function (v) {
+      var vid = v['version-id'];
+      var isCurrent = (vid === currentVerId);
+      var reps = Array.isArray(v.representations) ? v.representations : [];
+      var dialect = reps.map(function(r) { return r.dialect || r.type; }).join(', ') || 'trino';
+      var summaryStr = (v.summary && v.summary['iceberg-version']) ? v.summary['iceberg-version'] : JSON.stringify(v.summary || {});
+
+      html += '<tr>'
+        + '<td><strong>v' + esc(vid) + '</strong>' + (isCurrent ? ' <span class="badge-active">Current</span>' : '') + '</td>'
+        + '<td>' + esc(v['timestamp-ms'] ? formatMs(v['timestamp-ms']) : '\u2014') + '</td>'
+        + '<td>' + esc(v['schema-id'] !== undefined ? v['schema-id'] : '\u2014') + '</td>'
+        + '<td>' + esc(dialect) + '</td>'
+        + '<td>' + esc(summaryStr) + '</td>'
+        + '</tr>';
+    });
+
+    html += tableClose() + '</div>';
+    el.innerHTML = html;
   }
 
   // ── T-20: Schema Information ─────────────────────────────────────────────
@@ -596,6 +688,13 @@ export function getMetadataDetailHtml(
 
   function renderPartitioning(payload) {
     var el = document.getElementById('section-partitioning');
+    if (isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
     var specs      = payload['partition-specs'];
     var legacySpec = payload['partition-spec'];
     var defaultId  = payload['default-spec-id'];
@@ -640,6 +739,13 @@ export function getMetadataDetailHtml(
 
   function renderSortOrders(payload) {
     var el = document.getElementById('section-sort-orders');
+    if (isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
     var orders    = payload['sort-orders'];
     var defaultId = payload['default-sort-order-id'];
 
@@ -686,6 +792,13 @@ export function getMetadataDetailHtml(
 
   function renderSnapshots(payload) {
     var el = document.getElementById('section-snapshots');
+    if (isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
     var snapshots = payload['snapshots'];
 
     if (!Array.isArray(snapshots) || snapshots.length === 0) {
@@ -727,6 +840,13 @@ export function getMetadataDetailHtml(
 
   function renderRefs(payload) {
     var el = document.getElementById('section-refs');
+    if (isView(payload)) {
+      el.innerHTML = '';
+      el.style.display = 'none';
+      return;
+    }
+    el.style.display = 'block';
+
     var refs = payload['refs'];
 
     // V1: key absent — section silently omitted (A-8, FR-10h)

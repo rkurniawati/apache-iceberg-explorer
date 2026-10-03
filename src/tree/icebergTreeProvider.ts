@@ -24,6 +24,7 @@ import {
   makeConnectionItem,
   makeSchemaItem,
   makeTableItem,
+  makeViewItem,
   makeMetadataVersionItem,
   makeMetadataFolderItem,
   makeDataFolderItem,
@@ -313,9 +314,13 @@ export class IcebergTreeProvider
               const tableCheck = await this.storageAdapter.isTable(handle, schemaPath);
               const isT = !isStorageError(tableCheck) && tableCheck;
               const label = lastSegment(schemaPath);
-              return isT
-                ? makeTableItem(schemaPath, label, parentPath)
-                : makeSchemaItem(schemaPath, label, parentPath);
+              if (isT) {
+                const isLikelyView = /(?:^|[._-])view(?:[._-]|$)/i.test(label);
+                return isLikelyView
+                  ? makeViewItem(schemaPath, label, parentPath)
+                  : makeTableItem(schemaPath, label, parentPath);
+              }
+              return makeSchemaItem(schemaPath, label, parentPath);
             }),
           );
         }
@@ -393,17 +398,21 @@ export class IcebergTreeProvider
                 const tableCheck = await this.storageAdapter.isTable(handle, tablePath);
                 const isT = !isStorageError(tableCheck) && tableCheck;
                 const label = lastSegment(tablePath);
-                return isT
-                  ? makeTableItem(tablePath, label, element.resourcePath)
-                  : makeSchemaItem(tablePath, label, element.resourcePath);
+                if (isT) {
+                  const isLikelyView = /(?:^|[._-])view(?:[._-]|$)/i.test(label);
+                  return isLikelyView
+                    ? makeViewItem(tablePath, label, element.resourcePath)
+                    : makeTableItem(tablePath, label, element.resourcePath);
+                }
+                return makeSchemaItem(tablePath, label, element.resourcePath);
               }),
             );
           }
 
-        } else if (element.nodeType === 'table') {
-          // ── Table → virtual folder nodes + root-level data files ─────────────
+        } else if (element.nodeType === 'table' || element.nodeType === 'view') {
+          // ── Table / View → virtual folder nodes + root-level data files ─────
           this.logger.info(
-            `Lazy-loading children for node type=table path=${element.resourcePath}`,
+            `Lazy-loading children for node type=${element.nodeType} path=${element.resourcePath}`,
           );
           const result = await this.storageAdapter.listDirectoryContents(handle, element.resourcePath);
           if (isStorageError(result)) {
@@ -439,9 +448,13 @@ export class IcebergTreeProvider
                   const subPath = `${element.resourcePath}/${subDir}`;
                   const tableCheck = await this.storageAdapter.isTable(handle, subPath);
                   const isT = !isStorageError(tableCheck) && tableCheck;
-                  return isT
-                    ? makeTableItem(subPath, subDir, element.resourcePath)
-                    : makeSchemaItem(subPath, subDir, element.resourcePath);
+                  if (isT) {
+                    const isLikelyView = /(?:^|[._-])view(?:[._-]|$)/i.test(subDir);
+                    return isLikelyView
+                      ? makeViewItem(subPath, subDir, element.resourcePath)
+                      : makeTableItem(subPath, subDir, element.resourcePath);
+                  }
+                  return makeSchemaItem(subPath, subDir, element.resourcePath);
                 }),
               );
             }

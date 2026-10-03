@@ -42,6 +42,11 @@ import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
 import type { QueryEngine, ManifestEntryRow, DataFileRow, QueryError } from '../query/index.js';
 import { isQueryError } from '../query/index.js';
 import { analyzeQuery } from '../query/sqlAnalyzer.js';
+import {
+  isIcebergViewMetadata,
+  extractIcebergViewDetails,
+  type IcebergViewDetails,
+} from '../utils/icebergView.js';
 
 // ---------------------------------------------------------------------------
 // User-facing error strings — one per error class (design.md §2.5.2, FR-20)
@@ -71,6 +76,10 @@ export interface ResolvedTableParquet {
   requestedLimit?: number;
   isSimpleScan: boolean;
   columns?: Array<{ name: string; type?: unknown }>;
+  isView?: boolean;
+  viewSql?: string;
+  viewName?: string;
+  underlyingTableName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -666,6 +675,7 @@ export class WebviewPanelManager {
     resourcePath: string,
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
+    initialSql?: string,
   ): Promise<void> {
     if (this.revealPath) {
       void this.revealPath(resourcePath);
@@ -745,7 +755,7 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    panel.webview.html = getAdHocQueryHtml(nonce, panel.webview.cspSource, resourcePath);
+    panel.webview.html = getAdHocQueryHtml(nonce, panel.webview.cspSource, resourcePath, initialSql);
 
     this.logger.info(`Panel opened: type=adHocQuery resource=${resourcePath}`);
   }
@@ -836,7 +846,13 @@ export class WebviewPanelManager {
     this.tempFiles.set(key, tempFilePaths);
 
     try {
-      const result = await engine.runAdHocQuery(tempFilePaths, sql, tableName);
+      const result = await engine.runAdHocQuery(
+        tempFilePaths,
+        sql,
+        resolveDetails?.underlyingTableName ?? tableName,
+        resolveDetails?.viewSql,
+        resolveDetails?.viewName,
+      );
       void this.deleteTempFile(key, tempFilePaths);
 
       if (isQueryError(result)) {
@@ -872,8 +888,97 @@ export class WebviewPanelManager {
   }
 
   /**
+   * Locates the storage path of an underlying table referenced by an Iceberg View.
+   * Probes candidate locations using default-namespace, parent directories, and warehouse root.
+   */
+  private async findViewUnderlyingTablePath(
+    handle: ActiveConnectionHandle,
+    viewPath: string,
+    referencedTable: string,
+    defaultNamespace: string[],
+    adapter: StorageAdapter,
+  ): Promise<string | undefined> {
+    const warehousePath = handle.warehousePath.replace(/\/$/, '');
+    const cleanRef = referencedTable.trim().replace(/^['"`]+|['"`]+$/g, '');
+    const candidates: string[] = [];
+
+    // 1. If table has namespace dots (e.g. "datalake.events")
+    if (cleanRef.includes('.')) {
+      const parts = cleanRef.split('.');
+      candidates.push(`${warehousePath}/${parts.join('/')}`);
+      candidates.push(`${warehousePath}/${parts[0]}.db/${parts.slice(1).join('/')}`);
+    }
+
+    // 2. Default namespace (e.g. ["datalake"] + "events")
+    if (defaultNamespace && defaultNamespace.length > 0) {
+      const nsPath = defaultNamespace.join('/');
+      candidates.push(`${warehousePath}/${nsPath}/${cleanRef}`);
+      candidates.push(`${warehousePath}/${nsPath}.db/${cleanRef}`);
+    }
+
+    // 3. Under the same parent directory as the view (e.g. s3://bucket/datalake.db/events)
+    const normView = viewPath.replace(/\\/g, '/').replace(/\/$/, '');
+    const lastSlash = normView.lastIndexOf('/');
+    if (lastSlash > 0) {
+      const parentDir = normView.slice(0, lastSlash);
+      candidates.push(`${parentDir}/${cleanRef}`);
+
+      // Also check grandparent directory with default namespace
+      const grandSlash = parentDir.lastIndexOf('/');
+      if (grandSlash > 0) {
+        const grandDir = parentDir.slice(0, grandSlash);
+        if (defaultNamespace.length > 0) {
+          candidates.push(`${grandDir}/${defaultNamespace.join('/')}/${cleanRef}`);
+          candidates.push(`${grandDir}/${defaultNamespace.join('/')}.db/${cleanRef}`);
+        }
+      }
+    }
+
+    // 4. Directly under warehousePath
+    candidates.push(`${warehousePath}/${cleanRef}`);
+
+    // Probe candidate paths with isTable (fast O(1) S3 metadata probe)
+    const seen = new Set<string>();
+    for (const cand of candidates) {
+      const normCand = cand.replace(/\\/g, '/');
+      if (seen.has(normCand) || normCand === normView) continue;
+      seen.add(normCand);
+
+      try {
+        const check = await adapter.isTable(handle, normCand);
+        if (!isStorageError(check) && check) {
+          return normCand;
+        }
+      } catch {
+        // ignore probe error and continue
+      }
+    }
+
+    // 5. Fallback: check schemas in warehouse
+    try {
+      const schemas = await adapter.listSchemas(handle);
+      if (!isStorageError(schemas) && Array.isArray(schemas)) {
+        for (const s of schemas) {
+          const cand = `${s}/${cleanRef}`;
+          if (seen.has(cand)) continue;
+          seen.add(cand);
+          const check = await adapter.isTable(handle, cand);
+          if (!isStorageError(check) && check) {
+            return cand;
+          }
+        }
+      }
+    } catch {
+      // ignore
+    }
+
+    return undefined;
+  }
+
+  /**
    * Resolves active Parquet data files for a table from its current metadata and manifests.
    * Uses SQL analysis, row-count targeting, and byte budgeting to prevent excessive S3 downloads.
+   * If the path points to an Iceberg View, resolves the underlying table and registers the view SQL.
    * If the path points to a namespace/database directory containing tables, it resolves
    * the child table automatically.
    */
@@ -926,6 +1031,80 @@ export class WebviewPanelManager {
     }
 
     const metaObj = metaJson as Record<string, unknown>;
+
+    // 2a. Check if this metadata represents an Apache Iceberg View
+    if (isIcebergViewMetadata(metaObj)) {
+      const viewDetails = extractIcebergViewDetails(metaObj);
+      if (!viewDetails.viewSql) {
+        return 'Iceberg view has no SQL representation defined in its active version.';
+      }
+
+      const referencedTables = viewDetails.referencedTables;
+      if (referencedTables.length === 0) {
+        return 'Iceberg view definition does not reference any tables in its FROM or JOIN clause.';
+      }
+
+      const primaryRef = referencedTables[0];
+      const underlyingTablePath = await this.findViewUnderlyingTablePath(
+        handle,
+        effectivePath,
+        primaryRef,
+        viewDetails.defaultNamespace,
+        adapter,
+      );
+
+      if (!underlyingTablePath) {
+        const nsStr = viewDetails.defaultNamespace.length > 0 ? viewDetails.defaultNamespace.join('.') : 'default';
+        return `Iceberg view references table "${primaryRef}" (namespace: ${nsStr}), but the table could not be found in warehouse ${handle.warehousePath}.`;
+      }
+
+      this.logger.info(`Resolved underlying table "${primaryRef}" at ${underlyingTablePath} for view ${effectivePath}`);
+
+      // Resolve parquet data files from the underlying table
+      const underlyingResult = await this.resolveTableParquetFiles(
+        handle,
+        underlyingTablePath,
+        adapter,
+        viewDetails.viewSql,
+      );
+
+      if (typeof underlyingResult === 'string' || isQueryError(underlyingResult)) {
+        return underlyingResult;
+      }
+
+      // Pre-flight validate query against the view's schema
+      const currentSchemaId = metaObj['current-schema-id'];
+      const schemas = Array.isArray(metaObj['schemas']) ? metaObj['schemas'] : [];
+      const currentSchema = (schemas.find((s: any) => s['schema-id'] === currentSchemaId) ?? metaObj['schema'] ?? schemas[0]) as Record<string, unknown> | undefined;
+      const fields = Array.isArray(currentSchema?.fields) ? currentSchema.fields : [];
+      const columns: Array<{ name: string; type?: unknown }> = fields.map((f: any) => ({
+        name: String(f.name ?? ''),
+        type: f.type,
+      }));
+
+      const tableNameForQuery = lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_');
+
+      if (sql && columns.length > 0 && typeof (engine as any).validateQuery === 'function') {
+        const valErr = await (engine as any).validateQuery(
+          sql,
+          columns,
+          tableNameForQuery,
+          underlyingResult.tableName,
+        );
+        if (isQueryError(valErr)) {
+          return valErr;
+        }
+      }
+
+      return {
+        ...underlyingResult,
+        isView: true,
+        viewSql: viewDetails.viewSql,
+        viewName: tableNameForQuery,
+        underlyingTableName: underlyingResult.tableName,
+        columns,
+      };
+    }
 
     // 2b. Extract schema columns & run pre-flight query validation before touching manifests or parquet files
     const currentSchemaId = metaObj['current-schema-id'];
@@ -1610,7 +1789,7 @@ export class WebviewPanelManager {
             void this._handleBreadcrumbNavigate(tablePath, msg.segment, handle, effectiveAdapter);
             break;
           case 'openAdHocQuery':
-            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter, msg.initialSql);
             break;
           case 'openMetadataPanel':
             void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
@@ -1962,6 +2141,12 @@ export class WebviewPanelManager {
     }
 
     const meta = raw as Record<string, any>;
+    const isView = isIcebergViewMetadata(meta);
+    let viewDetails: IcebergViewDetails | undefined;
+    if (isView) {
+      viewDetails = extractIcebergViewDetails(meta);
+    }
+
     const formatVersion = Number(meta['format-version'] ?? 1);
     const tableUuid = String(meta['table-uuid'] ?? '');
     const location = String(meta['location'] ?? tablePath);
@@ -2015,16 +2200,24 @@ export class WebviewPanelManager {
       tablePath,
       tableName: lastPathSegment(tablePath),
       formatVersion,
-      tableUuid,
+      tableUuid: isView ? (viewDetails?.viewUuid ?? '') : tableUuid,
       location,
       currentSnapshotId,
-      lastUpdatedMs,
+      lastUpdatedMs: isView ? (viewDetails?.versions[0]?.timestampMs ?? null) : lastUpdatedMs,
       columns,
-      partitionSpec,
-      snapshotsCount: snapshots.length,
+      partitionSpec: isView ? [] : partitionSpec,
+      snapshotsCount: isView ? (viewDetails?.versions.length ?? 0) : snapshots.length,
       properties,
       latestMetadataPath: latest.resourcePath,
-      snapshots,
+      snapshots: isView ? [] : snapshots,
+      isView,
+      viewUuid: viewDetails?.viewUuid,
+      currentVersionId: viewDetails?.currentVersionId,
+      viewSql: viewDetails?.viewSql,
+      viewDialect: viewDetails?.viewDialect,
+      defaultCatalog: viewDetails?.defaultCatalog,
+      defaultNamespace: viewDetails?.defaultNamespace,
+      viewVersions: viewDetails?.versions,
     });
   }
 
@@ -2070,6 +2263,57 @@ export class WebviewPanelManager {
     }
 
     const rawMeta = meta as Record<string, any>;
+    if (isIcebergViewMetadata(rawMeta)) {
+      const resolveResult = await this.resolveTableParquetFiles(
+        handle,
+        effectiveTablePath,
+        adapter,
+        'SELECT * FROM data LIMIT 100',
+      );
+      if (typeof resolveResult === 'string' || isQueryError(resolveResult)) {
+        const msg = typeof resolveResult === 'string' ? resolveResult : resolveResult.message;
+        gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: msg });
+        return;
+      }
+
+      const tempFilePaths: string[] = [];
+      try {
+        for (const p of resolveResult.parquetPaths) {
+          const fetchResult = await adapter.fetchFileToTemp(handle, p);
+          if (isStorageError(fetchResult)) {
+            gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch data files.' });
+            return;
+          }
+          tempFilePaths.push(fetchResult);
+        }
+
+        const previewRes = await engine.runAdHocQuery(
+          tempFilePaths,
+          'SELECT * FROM data LIMIT 100',
+          resolveResult.underlyingTableName,
+          resolveResult.viewSql,
+          resolveResult.viewName,
+        );
+
+        if (isQueryError(previewRes)) {
+          gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: previewRes.message });
+          return;
+        }
+
+        gate.post({
+          type: 'loadDataPreview',
+          columns: previewRes.columnNames,
+          rows: previewRes.rows,
+          rowCount: previewRes.rowCount,
+        });
+      } finally {
+        for (const t of tempFilePaths) {
+          void adapter.deleteTemp(t);
+        }
+      }
+      return;
+    }
+
     const currentSnapshotId = rawMeta['current-snapshot-id'];
     const snapshots = Array.isArray(rawMeta['snapshots']) ? rawMeta['snapshots'] : [];
     const currentSnap = snapshots.find((s: any) => s['snapshot-id'] === currentSnapshotId) ?? snapshots[snapshots.length - 1];

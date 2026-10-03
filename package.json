@@ -119,6 +119,7 @@
     "test:slice-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-manifest-panels.test.ts",
     "test:slice-new-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts",
     "test:slice-gcs": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-gcs.test.ts",
+    "test:slice-view": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-iceberg-view.test.ts",
     "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package",
     "postcompile": "npm run copy-wasm"
   },

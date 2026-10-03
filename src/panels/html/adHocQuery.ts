@@ -10,6 +10,7 @@ import {
   breadcrumbHtml,
   BREADCRUMB_CSS,
   RENDER_TABLE_SCRIPT,
+  escHtml,
 } from './shared.js';
 
 export { generateNonce };
@@ -22,7 +23,10 @@ export function getAdHocQueryHtml(
   nonce: string,
   cspSource: string,
   resourcePath: string,
+  initialSql?: string,
 ): string {
+  const queryText = initialSql ? escHtml(initialSql) : 'SELECT * FROM data LIMIT 100;';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -94,7 +98,7 @@ ${BREADCRUMB_CSS}
 <body>
   <div id="breadcrumb">${breadcrumbHtml(resourcePath)}</div>
   <div id="query-area">
-    <textarea id="sql-input" placeholder="SELECT * FROM data LIMIT 100">SELECT * FROM data LIMIT 100;</textarea>
+    <textarea id="sql-input" placeholder="SELECT * FROM data LIMIT 100">${queryText}</textarea>
     <div id="btn-row">
       <button id="run-btn">Run</button>
       <button id="cancel-btn">Cancel</button>

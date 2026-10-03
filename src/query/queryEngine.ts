@@ -401,6 +401,8 @@ export class QueryEngine {
     tempFilePath: string | string[],
     virtualName: string,
     tableName?: string,
+    viewSql?: string,
+    viewName?: string,
   ): Promise<{ rows: Record<string, unknown>[]; columnNames: string[] }> {
     const db = await this.getInstance();
     const files = Array.isArray(tempFilePath) ? tempFilePath : [tempFilePath];
@@ -436,13 +438,39 @@ export class QueryEngine {
           const readParquetSql = registeredNames.length === 1
             ? `read_parquet('${registeredNames[0]}')`
             : `read_parquet([${parquetSources}])`;
-          await conn.query(
-            `CREATE OR REPLACE TEMPORARY VIEW data AS SELECT * FROM ${readParquetSql}`,
-          );
-          if (tableName && tableName !== 'data') {
+
+          if (viewSql) {
+            const underlying = tableName || 'events';
             await conn.query(
-              `CREATE OR REPLACE TEMPORARY VIEW "${tableName}" AS SELECT * FROM data`,
+              `CREATE OR REPLACE TEMPORARY VIEW "${underlying}" AS SELECT * FROM ${readParquetSql}`,
             );
+
+            const cleanViewSql = viewSql.trim().replace(/;+\s*$/, '');
+            let viewCreated = false;
+            try {
+              await conn.query(`CREATE OR REPLACE TEMPORARY VIEW data AS ${cleanViewSql}`);
+              viewCreated = true;
+            } catch (vErr) {
+              this.logger.warn(`Could not register viewSql directly as 'data' view: ${vErr instanceof Error ? vErr.message : String(vErr)}`);
+              await conn.query(`CREATE OR REPLACE TEMPORARY VIEW data AS SELECT * FROM ${readParquetSql}`);
+            }
+
+            if (viewName && viewName !== 'data' && viewName !== underlying) {
+              if (viewCreated) {
+                await conn.query(`CREATE OR REPLACE TEMPORARY VIEW "${viewName}" AS SELECT * FROM data`);
+              } else {
+                await conn.query(`CREATE OR REPLACE TEMPORARY VIEW "${viewName}" AS SELECT * FROM "${underlying}"`);
+              }
+            }
+          } else {
+            await conn.query(
+              `CREATE OR REPLACE TEMPORARY VIEW data AS SELECT * FROM ${readParquetSql}`,
+            );
+            if (tableName && tableName !== 'data') {
+              await conn.query(
+                `CREATE OR REPLACE TEMPORARY VIEW "${tableName}" AS SELECT * FROM data`,
+              );
+            }
           }
         }
 
@@ -469,6 +497,9 @@ export class QueryEngine {
           try { await conn.query('DROP VIEW IF EXISTS data'); } catch { /* ignore */ }
           if (tableName && tableName !== 'data') {
             try { await conn.query(`DROP VIEW IF EXISTS "${tableName}"`); } catch { /* ignore */ }
+          }
+          if (viewName && viewName !== 'data' && viewName !== tableName) {
+            try { await conn.query(`DROP VIEW IF EXISTS "${viewName}"`); } catch { /* ignore */ }
           }
         }
         try { await conn.close(); } catch { /* ignore */ }
@@ -655,6 +686,8 @@ export class QueryEngine {
     tempFilePath: string | string[],
     sql: string,
     tableName?: string,
+    viewSql?: string,
+    viewName?: string,
   ): Promise<QueryResult | QueryError> {
     // QE-V2: empty SQL guard
     if (!sql.trim()) {
@@ -684,7 +717,15 @@ export class QueryEngine {
 
     const start = Date.now();
     try {
-      const { rows, columnNames } = await this.runQuery(finalSql, 'adhoc', files, virtualName, tableName);
+      const { rows, columnNames } = await this.runQuery(
+        finalSql,
+        'adhoc',
+        files,
+        virtualName,
+        tableName,
+        viewSql,
+        viewName,
+      );
       const durationMs = Date.now() - start;
       const wasCapped = !hasLimit && rows.length === ADHOC_LIMIT;
 
@@ -713,6 +754,7 @@ export class QueryEngine {
     sql: string,
     columns?: Array<{ name: string; type?: unknown }>,
     tableName?: string,
+    underlyingTableName?: string,
   ): Promise<QueryError | null> {
     if (!sql || !sql.trim()) {
       return queryError('internal', 'Query cannot be empty.');
@@ -752,6 +794,10 @@ export class QueryEngine {
       if (sanitizedTable && sanitizedTable !== 'data') {
         await conn.query(`CREATE OR REPLACE TEMPORARY VIEW "${sanitizedTable}" AS SELECT * FROM data`);
       }
+      const sanitizedUnderlying = underlyingTableName?.replace(/[^a-zA-Z0-9_]/g, '_');
+      if (sanitizedUnderlying && sanitizedUnderlying !== 'data' && sanitizedUnderlying !== sanitizedTable) {
+        await conn.query(`CREATE OR REPLACE TEMPORARY VIEW "${sanitizedUnderlying}" AS SELECT * FROM data`);
+      }
 
       await conn.query(finalSql);
       return null;
@@ -762,6 +808,10 @@ export class QueryEngine {
       try { await conn.query('DROP VIEW IF EXISTS data'); } catch { /* ignore */ }
       if (sanitizedTable && sanitizedTable !== 'data') {
         try { await conn.query(`DROP VIEW IF EXISTS "${sanitizedTable}"`); } catch { /* ignore */ }
+      }
+      const sanitizedUnderlying = underlyingTableName?.replace(/[^a-zA-Z0-9_]/g, '_');
+      if (sanitizedUnderlying && sanitizedUnderlying !== 'data' && sanitizedUnderlying !== sanitizedTable) {
+        try { await conn.query(`DROP VIEW IF EXISTS "${sanitizedUnderlying}"`); } catch { /* ignore */ }
       }
       try { await conn.close(); } catch { /* ignore */ }
     }

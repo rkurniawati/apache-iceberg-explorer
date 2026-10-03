@@ -259,9 +259,13 @@ export function getTableOverviewHtml(
           <span class="badge" id="version-badge">v2</span>
         </div>
         <div class="meta-details">
-          <span class="meta-item">Location: <strong id="table-location"></strong></span>
-          <span class="meta-item">Current Snapshot: <strong id="current-snapshot" style="font-family: monospace;"></strong></span>
-          <span class="meta-item">Updated: <strong id="table-updated"></strong></span>
+          <span class="meta-item" id="item-location">Location: <strong id="table-location"></strong></span>
+          <span class="meta-item" id="item-current-snapshot">Current Snapshot: <strong id="current-snapshot" style="font-family: monospace;"></strong></span>
+          <span class="meta-item" id="item-view-uuid" style="display: none;">View UUID: <strong id="view-uuid" style="font-family: monospace;"></strong></span>
+          <span class="meta-item" id="item-current-version" style="display: none;">Current Version: <strong id="current-version"></strong></span>
+          <span class="meta-item" id="item-default-namespace" style="display: none;">Namespace: <strong id="default-namespace"></strong></span>
+          <span class="meta-item" id="item-default-catalog" style="display: none;">Catalog: <strong id="default-catalog"></strong></span>
+          <span class="meta-item" id="item-updated">Updated: <strong id="table-updated"></strong></span>
         </div>
       </div>
       <div class="actions-bar">
@@ -272,16 +276,19 @@ export function getTableOverviewHtml(
     </div>
 
     <div class="tabs-bar">
-      <button class="tab-btn active" data-tab="schema">Schema & Columns</button>
-      <button class="tab-btn" data-tab="preview">Data Preview</button>
-      <button class="tab-btn" data-tab="snapshots">Snapshots History</button>
+      <button class="tab-btn active" data-tab="schema" id="tab-btn-schema">Schema & Columns</button>
+      <button class="tab-btn" data-tab="sql" id="tab-btn-sql" style="display: none;">View SQL</button>
+      <button class="tab-btn" data-tab="preview" id="tab-btn-preview">Data Preview</button>
+      <button class="tab-btn" data-tab="snapshots" id="tab-btn-snapshots">Snapshots History</button>
     </div>
 
     <!-- Tab 1: Schema -->
     <div id="tab-schema" class="tab-content">
-      <div style="font-weight: 600; margin-bottom: 0.4rem;">Partition Specification</div>
-      <div class="partition-chips" id="partition-chips">
-        <span style="color: var(--vscode-descriptionForeground); font-style: italic;">Unpartitioned</span>
+      <div id="partition-section">
+        <div style="font-weight: 600; margin-bottom: 0.4rem;">Partition Specification</div>
+        <div class="partition-chips" id="partition-chips">
+          <span style="color: var(--vscode-descriptionForeground); font-style: italic;">Unpartitioned</span>
+        </div>
       </div>
 
       <div class="filter-bar">
@@ -310,6 +317,15 @@ export function getTableOverviewHtml(
           <tbody id="properties-tbody"></tbody>
         </table>
       </div>
+    </div>
+
+    <!-- Tab: View SQL (Visible for Iceberg Views) -->
+    <div id="tab-sql" class="tab-content" style="display: none;">
+      <div class="filter-bar">
+        <div><strong>Dialect:</strong> <span class="badge" id="view-dialect-badge" style="background: #0284c7; color: #fff;">TRINO</span></div>
+        <button class="btn btn-secondary" id="copy-sql-btn">📋 Copy SQL</button>
+      </div>
+      <pre style="background: var(--vscode-editor-background); border: 1px solid var(--vscode-editorWidget-border); padding: 1rem; border-radius: 4px; overflow: auto; max-height: 500px; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; line-height: 1.5;"><code id="view-sql-code"></code></pre>
     </div>
 
     <!-- Tab 2: Data Preview -->
@@ -375,7 +391,23 @@ export function getTableOverviewHtml(
     // Action buttons
     document.getElementById('query-btn')?.addEventListener('click', () => {
       if (currentOverview) {
-        vscode.postMessage({ type: 'openAdHocQuery', resourcePath: currentOverview.tablePath });
+        vscode.postMessage({
+          type: 'openAdHocQuery',
+          resourcePath: currentOverview.tablePath,
+          initialSql: currentOverview.viewSql,
+        });
+      }
+    });
+
+    document.getElementById('copy-sql-btn')?.addEventListener('click', () => {
+      if (currentOverview?.viewSql) {
+        navigator.clipboard?.writeText(currentOverview.viewSql).catch(() => {});
+        const btn = document.getElementById('copy-sql-btn');
+        if (btn) {
+          const orig = btn.textContent;
+          btn.textContent = '✓ Copied!';
+          setTimeout(() => { btn.textContent = orig; }, 2000);
+        }
       }
     });
 
@@ -571,8 +603,57 @@ export function getTableOverviewHtml(
 
         document.getElementById('table-name').textContent = msg.tableName;
         const vBadge = document.getElementById('version-badge');
-        vBadge.textContent = 'v' + msg.formatVersion;
-        vBadge.className = 'badge badge-v' + msg.formatVersion;
+        if (msg.isView) {
+          vBadge.textContent = 'VIEW (v' + msg.formatVersion + ')';
+          vBadge.className = 'badge';
+          vBadge.style.background = '#0284c7';
+          vBadge.style.color = '#fff';
+
+          document.getElementById('view-dag-btn').style.display = 'none';
+          document.getElementById('item-current-snapshot').style.display = 'none';
+          document.getElementById('partition-section').style.display = 'none';
+
+          document.getElementById('item-view-uuid').style.display = 'inline';
+          document.getElementById('view-uuid').textContent = msg.viewUuid || msg.tableUuid;
+          document.getElementById('item-current-version').style.display = 'inline';
+          document.getElementById('current-version').textContent = 'v' + (msg.currentVersionId ?? 1);
+
+          if (msg.defaultNamespace && msg.defaultNamespace.length > 0) {
+            document.getElementById('item-default-namespace').style.display = 'inline';
+            document.getElementById('default-namespace').textContent = msg.defaultNamespace.join('.');
+          } else {
+            document.getElementById('item-default-namespace').style.display = 'none';
+          }
+
+          if (msg.defaultCatalog) {
+            document.getElementById('item-default-catalog').style.display = 'inline';
+            document.getElementById('default-catalog').textContent = msg.defaultCatalog;
+          } else {
+            document.getElementById('item-default-catalog').style.display = 'none';
+          }
+
+          document.getElementById('tab-btn-sql').style.display = 'inline-block';
+          document.getElementById('tab-btn-snapshots').textContent = 'Versions & History';
+          document.getElementById('view-sql-code').textContent = msg.viewSql || 'No SQL definition available.';
+          document.getElementById('view-dialect-badge').textContent = (msg.viewDialect || 'sql').toUpperCase();
+        } else {
+          vBadge.textContent = 'v' + msg.formatVersion;
+          vBadge.className = 'badge badge-v' + msg.formatVersion;
+          vBadge.style.background = '';
+          vBadge.style.color = '';
+
+          document.getElementById('view-dag-btn').style.display = 'inline-flex';
+          document.getElementById('item-current-snapshot').style.display = 'inline';
+          document.getElementById('partition-section').style.display = 'block';
+
+          document.getElementById('item-view-uuid').style.display = 'none';
+          document.getElementById('item-current-version').style.display = 'none';
+          document.getElementById('item-default-namespace').style.display = 'none';
+          document.getElementById('item-default-catalog').style.display = 'none';
+
+          document.getElementById('tab-btn-sql').style.display = 'none';
+          document.getElementById('tab-btn-snapshots').textContent = 'Snapshots History';
+        }
 
         document.getElementById('table-location').textContent = msg.location;
         document.getElementById('current-snapshot').textContent = msg.currentSnapshotId || 'None';
@@ -611,8 +692,21 @@ export function getTableOverviewHtml(
           document.getElementById('properties-section').style.display = 'none';
         }
 
-        // Snapshots
-        allSnapshots = msg.snapshots || [];
+        // Snapshots or View Versions
+        if (msg.isView && Array.isArray(msg.viewVersions) && msg.viewVersions.length > 0) {
+          allSnapshots = msg.viewVersions.map((v) => ({
+            snapshotId: 'v' + v.versionId,
+            parentSnapshotId: null,
+            timestampMs: v.timestampMs,
+            operation: (v.representations && v.representations[0]?.dialect) ? v.representations[0].dialect.toUpperCase() : 'VIEW',
+            addedRecords: undefined,
+            deletedRecords: undefined,
+            addedFiles: undefined,
+            manifestList: undefined,
+          }));
+        } else {
+          allSnapshots = msg.snapshots || [];
+        }
         snapshotPage = 0;
         renderSnapshots();
 

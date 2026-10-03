@@ -10,6 +10,10 @@ import * as fsSync from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import * as crypto from 'node:crypto';
+import * as zlib from 'node:zlib';
+import { promisify } from 'node:util';
+
+const gunzipAsync = promisify(zlib.gunzip);
 
 import type { StorageAdapter } from './StorageAdapter.js';
 import type { ActiveConnectionHandle, MetadataVersionEntry, DirectoryContentsResult } from './types.js';
@@ -107,8 +111,10 @@ export class LocalFsAdapter implements StorageAdapter {
     this.logger.info(`Fetch started: path=${filePath} source=local`);
 
     try {
-      const raw = await fs.readFile(filePath, 'utf-8');
-      return JSON.parse(raw);
+      const buffer = await fs.readFile(filePath);
+      const isGzip = filePath.endsWith('.gz') || filePath.endsWith('.gz.metadata.json') || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
+      const text = isGzip ? (await gunzipAsync(buffer)).toString('utf-8') : buffer.toString('utf-8');
+      return JSON.parse(text);
     } catch (raw) {
       const err = mapNodeError(raw);
       this.logger.error(`Fetch failed: path=${filePath} errorClass=${err.class}`);

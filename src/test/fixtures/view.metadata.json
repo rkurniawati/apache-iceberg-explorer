@@ -1,0 +1,75 @@
+{
+  "view-uuid": "f76d529e-7c11-4da7-afde-65e95901aece",
+  "format-version": 1,
+  "location": "s3a://ltr-test/datalake.db/exception_view-9250e55228b0434080f83910c9a99d53",
+  "properties": {
+    "trino.run-as-owner": "db_maintenance"
+  },
+  "schemas": [
+    {
+      "type": "struct",
+      "schema-id": 0,
+      "fields": [
+        { "id": 1, "name": "AppUsername", "required": true, "type": "string" },
+        { "id": 2, "name": "ClientHostName", "required": true, "type": "string" },
+        { "id": 3, "name": "ClientIP", "required": true, "type": "string" },
+        { "id": 4, "name": "Count", "required": true, "type": "int" },
+        { "id": 5, "name": "DatabaseName", "required": true, "type": "string" },
+        { "id": 6, "name": "DB2ICurrentUser", "required": true, "type": "string" },
+        { "id": 7, "name": "DB2IZDatabase", "required": true, "type": "string" },
+        { "id": 8, "name": "DB2IZProgram", "required": true, "type": "string" },
+        { "id": 9, "name": "DBErrorText", "required": true, "type": "string" },
+        { "id": 10, "name": "DBProtocol", "required": true, "type": "string" },
+        { "id": 11, "name": "DBUserName", "required": true, "type": "string" },
+        { "id": 12, "name": "DestinationAddress", "required": true, "type": "string" },
+        { "id": 13, "name": "ErrorCode", "required": true, "type": "string" },
+        { "id": 14, "name": "ExceptionDescription", "required": true, "type": "string" },
+        { "id": 15, "name": "ExceptionTypeID", "required": true, "type": "string" },
+        { "id": 16, "name": "InformationLink", "required": true, "type": "string" },
+        { "id": 17, "name": "NetworkProtocol", "required": true, "type": "string" },
+        { "id": 18, "name": "OSUser", "required": true, "type": "string" },
+        { "id": 19, "name": "ProcessID", "required": true, "type": "string" },
+        { "id": 20, "name": "ServerIP", "required": true, "type": "string" },
+        { "id": 21, "name": "SenderIP", "required": true, "type": "string" },
+        { "id": 22, "name": "ServerHostName", "required": true, "type": "string" },
+        { "id": 23, "name": "ServerPort", "required": true, "type": "string" },
+        { "id": 24, "name": "ServerType", "required": true, "type": "string" },
+        { "id": 25, "name": "ServiceName", "required": true, "type": "string" },
+        { "id": 26, "name": "SessionID", "required": true, "type": "long" },
+        { "id": 27, "name": "SourceAddress", "required": true, "type": "string" },
+        { "id": 28, "name": "SourceProgram", "required": true, "type": "string" },
+        { "id": 29, "name": "SQLStatement", "required": true, "type": "string" },
+        { "id": 30, "name": "TapIdentifier", "required": true, "type": "string" },
+        { "id": 31, "name": "TimestampUTC", "required": true, "type": "timestamptz" },
+        { "id": 32, "name": "UIDChain", "required": true, "type": "string" },
+        { "id": 33, "name": "UTCOffset", "required": true, "type": "double" }
+      ]
+    }
+  ],
+  "current-version-id": 1,
+  "versions": [
+    {
+      "version-id": 1,
+      "timestamp-ms": 1789665324363,
+      "schema-id": 0,
+      "summary": {
+        "iceberg-version": "Apache Iceberg 1.9.1 (commit f40208ae6fb2f33e578c2637d3dea1db18739f31)"
+      },
+      "default-catalog": "gdp_iceberg",
+      "default-namespace": ["datalake"],
+      "representations": [
+        {
+          "type": "sql",
+          "sql": "SELECT\n  AppUsername\n, ClientHostName\n, ClientIP\n, Count\n, DatabaseName\n, DB2ICurrentUser\n, DB2IZDatabase\n, DB2IZProgram\n, DBErrorText\n, DBProtocol\n, DBUserName\n, DestinationAddress\n, ErrorCode\n, ExceptionDescription\n, ExceptionTypeID\n, InformationLink\n, NetworkProtocol\n, OSUser\n, ProcessID\n, ServerIP\n, SenderIP\n, ServerHostName\n, ServerPort\n, ServerType\n, ServiceName\n, SessionID\n, SourceAddress\n, SourceProgram\n, SQLStatement\n, TapIdentifier\n, TimestampUTC\n, UIDChain\n, UTCOffset\nFROM\n  events\nWHERE (RecordType = 2)\n",
+          "dialect": "trino"
+        }
+      ]
+    }
+  ],
+  "version-log": [
+    {
+      "timestamp-ms": 1789665324363,
+      "version-id": 1
+    }
+  ]
+}

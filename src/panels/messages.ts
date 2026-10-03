@@ -83,6 +83,22 @@ export interface SnapshotSummaryItem {
   manifestList?: string;
 }
 
+export interface ViewRepresentationSummary {
+  type: string;
+  sql?: string;
+  dialect?: string;
+}
+
+export interface ViewVersionSummary {
+  versionId: number;
+  timestampMs: number;
+  schemaId: number;
+  summary?: Record<string, string>;
+  defaultCatalog?: string;
+  defaultNamespace?: string[];
+  representations?: ViewRepresentationSummary[];
+}
+
 export interface LoadTableOverviewMessage {
   type: 'loadTableOverview';
   tablePath: string;
@@ -98,6 +114,15 @@ export interface LoadTableOverviewMessage {
   properties: Record<string, string>;
   latestMetadataPath: string;
   snapshots: SnapshotSummaryItem[];
+  // View extensions
+  isView?: boolean;
+  viewUuid?: string;
+  currentVersionId?: number | null;
+  viewSql?: string;
+  viewDialect?: string;
+  defaultCatalog?: string;
+  defaultNamespace?: string[];
+  viewVersions?: ViewVersionSummary[];
 }
 
 export interface LoadDataPreviewMessage {
@@ -239,6 +264,7 @@ export interface OpenParquetPreviewMessage {
 export interface OpenAdHocQueryMessage {
   type: 'openAdHocQuery';
   resourcePath: string;
+  initialSql?: string;
 }
 
 export interface RunQueryMessage {

@@ -17,6 +17,7 @@ export type TreeNodeType =
   | 'connection'       // saved connection node at the tree root
   | 'schema'
   | 'table'
+  | 'view'             // Iceberg view node
   | 'metadataFolder'   // virtual "Metadata" node under table
   | 'dataFolder'        // virtual "Data" node under table
   | 'metadataVersion'
@@ -95,6 +96,23 @@ export function makeTableItem(tablePath: string, label: string, parentPath: stri
     command: 'icebergExplorer.openTableOverview',
     title: 'Open Table Overview',
     arguments: [tablePath],
+  };
+  return item;
+}
+
+/** Creates an Iceberg view node. */
+export function makeViewItem(viewPath: string, label: string, parentPath: string): IcebergTreeItem {
+  const item = new IcebergTreeItem(
+    label,
+    'view',
+    viewPath,
+    parentPath,
+  );
+  item.iconPath = new vscode.ThemeIcon('eye');
+  item.command = {
+    command: 'icebergExplorer.openTableOverview',
+    title: 'Open View Overview',
+    arguments: [viewPath],
   };
   return item;
 }
@@ -264,6 +282,7 @@ function collapsibleStateFor(nodeType: TreeNodeType): vscode.TreeItemCollapsible
   // collapsibleState directly based on isActive, overriding this default.
   return nodeType === 'schema' ||
     nodeType === 'table' ||
+    nodeType === 'view' ||
     nodeType === 'metadataFolder' ||
     nodeType === 'dataFolder' ||
     nodeType === 'dataDirectory'
