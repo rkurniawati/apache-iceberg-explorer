@@ -140,11 +140,12 @@ export function registerTreeCommands(
   );
 
   // ── icebergExplorer.openMetadataArchitecture ────────────────────────────
-  // Arguments: [tablePath: string]
+  // Arguments: [tablePath: string] or [item: IcebergTreeItem]
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'icebergExplorer.openMetadataArchitecture',
-      async (tablePath: string) => {
+      async (tablePathOrItem: string | IcebergTreeItem) => {
+        const tablePath = typeof tablePathOrItem === 'string' ? tablePathOrItem : tablePathOrItem.resourcePath;
         logger.info(`openMetadataArchitecture command: path=${tablePath}`);
         const handle = provider.getActiveHandle();
         if (!handle) {

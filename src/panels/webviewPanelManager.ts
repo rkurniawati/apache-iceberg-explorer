@@ -1852,23 +1852,25 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
   ): Promise<void> {
+    const cleanTablePath = tablePath.replace(/\/metadata\/?$/, '');
+    const metadataPath = `${cleanTablePath}/metadata`;
     if (this.revealPath) {
-      void this.revealPath(tablePath);
+      void this.revealPath(metadataPath);
     }
     const effectiveAdapter = adapter ?? this.storageAdapter;
-    const key = panelRegistryKey(PanelType.MetadataArchitecture, tablePath);
+    const key = panelRegistryKey(PanelType.MetadataArchitecture, cleanTablePath);
     const existing = this.registry.get(key);
 
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.One);
-      this.logger.info(`Panel revealed (already open): type=metadataArchitecture resource=${tablePath}`);
+      this.logger.info(`Panel revealed (already open): type=metadataArchitecture resource=${cleanTablePath}`);
       if (existing.gate) {
         existing.gate.repost();
       }
       return;
     }
 
-    const title = lastPathSegment(tablePath);
+    const title = lastPathSegment(cleanTablePath);
     const panel = vscode.window.createWebviewPanel(
       PanelType.MetadataArchitecture,
       `${title} — Architecture DAG`,
@@ -1878,9 +1880,9 @@ export class WebviewPanelManager {
 
     const gate = new WebviewReadyGate(panel, this.logger, 'metadataArchitecture');
     const nonce = generateNonce();
-    panel.webview.html = getMetadataArchitectureHtml(nonce, panel.webview.cspSource, tablePath);
+    panel.webview.html = getMetadataArchitectureHtml(nonce, panel.webview.cspSource, cleanTablePath);
 
-    const record: PanelRecord = { panel, resourcePath: tablePath, handle, adapter: effectiveAdapter, gate };
+    const record: PanelRecord = { panel, resourcePath: cleanTablePath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
     this.tempFiles.set(key, null);
 
@@ -1894,7 +1896,7 @@ export class WebviewPanelManager {
       panel.onDidChangeViewState(
         (e) => {
           if (e.webviewPanel.active && this.revealPath) {
-            void this.revealPath(tablePath);
+            void this.revealPath(metadataPath);
           }
         },
         undefined,
@@ -1909,10 +1911,10 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadMetadataArchitecture(gate, tablePath, handle, effectiveAdapter);
+            void this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
-            void this._handleBreadcrumbNavigate(tablePath, msg.segment, handle, effectiveAdapter);
+            void this._handleBreadcrumbNavigate(cleanTablePath, msg.segment, handle, effectiveAdapter);
             break;
           case 'openTableOverview':
             void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
@@ -1932,8 +1934,8 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    this.logger.info(`Panel opened: type=metadataArchitecture resource=${tablePath}`);
-    await this.loadMetadataArchitecture(gate, tablePath, handle, effectiveAdapter);
+    this.logger.info(`Panel opened: type=metadataArchitecture resource=${cleanTablePath}`);
+    await this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter);
   }
 
   // ── Helper loading methods ──────────────────────────────────────────────────

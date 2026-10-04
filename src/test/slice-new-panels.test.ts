@@ -413,6 +413,29 @@ async function runTests() {
     assert.strictEqual(openedResource, 's3://warehouse/db/events/data/file1.parquet');
   });
 
+  await test('Metadata Architecture DAG: reveals metadata node path in tree view', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const qe = makeQueryEngine();
+    let revealedPath = '';
+    const manager = new WebviewPanelManager(
+      makeContext(),
+      adapter,
+      logger,
+      qe as any,
+      (p) => { revealedPath = p; },
+    );
+
+    // Opening with table path reveals tablePath/metadata
+    await manager.openMetadataArchitecturePanel('s3://warehouse/db/events', handle, adapter);
+    assert.strictEqual(revealedPath, 's3://warehouse/db/events/metadata');
+
+    // Opening with tablePath/metadata also normalizes and reveals tablePath/metadata
+    revealedPath = '';
+    await manager.openMetadataArchitecturePanel('s3://warehouse/db/events/metadata', handle, adapter);
+    assert.strictEqual(revealedPath, 's3://warehouse/db/events/metadata');
+  });
+
   // ─── Ad-hoc Query Table Path Resolution ──────────────────────────────────
 
   await test('Ad-hoc query panel: queries Iceberg table path by resolving active parquet data files', async () => {
