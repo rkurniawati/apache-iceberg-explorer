@@ -53,7 +53,7 @@ export class LocalFsAdapter implements StorageAdapter {
     try {
       const entries = await fs.readdir(schemaPath, { withFileTypes: true });
       return entries
-        .filter((e) => e.isDirectory())
+        .filter((e) => e.isDirectory() && e.name !== 'metadata')
         .map((e) => path.join(schemaPath, e.name));
     } catch (raw) {
       return mapNodeError(raw);
@@ -220,7 +220,9 @@ export class LocalFsAdapter implements StorageAdapter {
 
     try {
       const stat = await fs.stat(metaDir);
-      return stat.isDirectory();
+      if (!stat.isDirectory()) return false;
+      const entries = await fs.readdir(metaDir);
+      return entries.length > 0;
     } catch {
       return false;
     }

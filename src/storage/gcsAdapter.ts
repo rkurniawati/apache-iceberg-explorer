@@ -69,7 +69,9 @@ export class GcsAdapter implements StorageAdapter {
     const result = await this.listCommonPrefixes(handle, prefix);
     if (isStorageError(result)) return result;
 
-    return result.map((p) => `gs://${gcsConfig.bucket}/${p.replace(/\/$/, '')}`);
+    return result
+      .map((p) => `gs://${gcsConfig.bucket}/${p.replace(/\/$/, '')}`)
+      .filter((p) => !p.endsWith('/metadata'));
   }
 
   // -------------------------------------------------------------------------
@@ -308,10 +310,17 @@ export class GcsAdapter implements StorageAdapter {
       const bucket = gcsConfig.client.bucket(gcsConfig.bucket);
       const [files] = await bucket.getFiles({
         prefix,
-        maxResults: 1,
+        maxResults: 10,
         autoPaginate: false,
       });
-      return files.length > 0;
+      return files.some((f) => {
+        const name = f.name;
+        if (!name) return false;
+        if (name === prefix || name === prefix.replace(/\/$/, '') || name.endsWith('/')) {
+          return false;
+        }
+        return true;
+      });
     } catch (raw) {
       const err = mapGcsError(raw);
       const name =

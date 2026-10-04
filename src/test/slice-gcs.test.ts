@@ -280,6 +280,13 @@ void (async () => {
             {},
           ];
         }
+        if (query.prefix === 'warehouse/db1/tableEmpty/metadata/') {
+          return [
+            [{ name: 'warehouse/db1/tableEmpty/metadata/' }],
+            null,
+            {},
+          ];
+        }
         return [[], null, {}];
       },
       file(name: string) {
@@ -362,6 +369,9 @@ void (async () => {
     // isTable
     const isTab = await adapter.isTable(handle, 'gs://iceberg-bucket/warehouse/db1/tableA');
     assert.strictEqual(isTab, true);
+
+    const isTabEmpty = await adapter.isTable(handle, 'gs://iceberg-bucket/warehouse/db1/tableEmpty');
+    assert.strictEqual(isTabEmpty, false, 'expected empty table with directory marker only to return false');
   });
 
   // 6. resourcePathToBreadcrumbs with gs://

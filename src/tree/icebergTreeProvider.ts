@@ -309,20 +309,23 @@ export class IcebergTreeProvider
           children = [makeErrorItem(cacheKey, 'schema', result.message)];
         } else {
           const parentPath = this.activeConnectionId ?? ROOT_PATH;
-          children = await Promise.all(
+          const rawChildren = await Promise.all(
             result.map(async (schemaPath) => {
+              const label = lastSegment(schemaPath);
+              if (label === 'metadata') return null;
               const tableCheck = await this.storageAdapter.isTable(handle, schemaPath);
               const isT = !isStorageError(tableCheck) && tableCheck;
-              const label = lastSegment(schemaPath);
               if (isT) {
                 const isLikelyView = /(?:^|[._-])view(?:[._-]|$)/i.test(label);
                 return isLikelyView
                   ? makeViewItem(schemaPath, label, parentPath)
                   : makeTableItem(schemaPath, label, parentPath);
               }
+              if (label === 'data') return null;
               return makeSchemaItem(schemaPath, label, parentPath);
             }),
           );
+          children = rawChildren.filter((c): c is IcebergTreeItem => c !== null);
         }
         this.cache.set(cacheKey, children);
         return children;
@@ -393,20 +396,23 @@ export class IcebergTreeProvider
             );
             children = [makeErrorItem(cacheKey, parentNodeType, result.message)];
           } else {
-            children = await Promise.all(
+            const rawChildren = await Promise.all(
               result.map(async (tablePath) => {
+                const label = lastSegment(tablePath);
+                if (label === 'metadata') return null;
                 const tableCheck = await this.storageAdapter.isTable(handle, tablePath);
                 const isT = !isStorageError(tableCheck) && tableCheck;
-                const label = lastSegment(tablePath);
                 if (isT) {
                   const isLikelyView = /(?:^|[._-])view(?:[._-]|$)/i.test(label);
                   return isLikelyView
                     ? makeViewItem(tablePath, label, element.resourcePath)
                     : makeTableItem(tablePath, label, element.resourcePath);
                 }
+                if (label === 'data') return null;
                 return makeSchemaItem(tablePath, label, element.resourcePath);
               }),
             );
+            children = rawChildren.filter((c): c is IcebergTreeItem => c !== null);
           }
 
         } else if (element.nodeType === 'table' || element.nodeType === 'view') {
@@ -443,8 +449,9 @@ export class IcebergTreeProvider
               this.logger.info(
                 `Table node path=${element.resourcePath} has no metadata/data; resolving subdirectories: [${result.subdirectories.join(', ')}]`,
               );
-              children = await Promise.all(
+              const rawChildren = await Promise.all(
                 result.subdirectories.map(async (subDir) => {
+                  if (subDir === 'metadata') return null;
                   const subPath = `${element.resourcePath}/${subDir}`;
                   const tableCheck = await this.storageAdapter.isTable(handle, subPath);
                   const isT = !isStorageError(tableCheck) && tableCheck;
@@ -454,9 +461,11 @@ export class IcebergTreeProvider
                       ? makeViewItem(subPath, subDir, element.resourcePath)
                       : makeTableItem(subPath, subDir, element.resourcePath);
                   }
+                  if (subDir === 'data') return null;
                   return makeSchemaItem(subPath, subDir, element.resourcePath);
                 }),
               );
+              children = rawChildren.filter((c): c is IcebergTreeItem => c !== null);
             }
           }
 

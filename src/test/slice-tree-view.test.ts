@@ -11,6 +11,7 @@
 import * as assert from 'node:assert';
 
 import type { StorageAdapter } from '../storage/StorageAdapter';
+import { S3Adapter } from '../storage/s3Adapter';
 import type { ActiveConnectionHandle, MetadataVersionEntry, DirectoryContentsResult } from '../storage/types';
 import { storageError, type StorageError } from '../storage/errors';
 import type { ILogger } from '../extension';
@@ -904,6 +905,110 @@ void (async () => {
     assert.ok(tableResolved, 'expected resolved table item');
     assert.strictEqual(tableResolved.resourcePath, 's3://rk-iceberg/dogs/testdogs.db/dogtable1');
     assert.strictEqual(tableResolved.nodeType, 'table');
+  });
+
+  // ── Test 26: S3Adapter.isTable rejects empty directory markers and listTables filters metadata ──
+  await run('S3Adapter.isTable rejects empty directory markers and listTables filters metadata', async () => {
+    const mockS3Client = {
+      async send(command: any) {
+        const input = command.input;
+        if (input.Prefix === 'datalake.db/emptyTable/metadata/') {
+          // S3 returns only the 0-byte directory marker
+          return {
+            KeyCount: 1,
+            Contents: [{ Key: 'datalake.db/emptyTable/metadata/', Size: 0 }],
+          };
+        }
+        if (input.Prefix === 'datalake.db/realTable/metadata/') {
+          // S3 returns directory marker AND real metadata file
+          return {
+            KeyCount: 2,
+            Contents: [
+              { Key: 'datalake.db/realTable/metadata/', Size: 0 },
+              { Key: 'datalake.db/realTable/metadata/00000-abc.metadata.json', Size: 1024 },
+            ],
+          };
+        }
+        if (input.Prefix === 'datalake.db/') {
+          // S3 returns common prefixes including metadata
+          return {
+            CommonPrefixes: [
+              { Prefix: 'datalake.db/emptyTable/' },
+              { Prefix: 'datalake.db/realTable/' },
+              { Prefix: 'datalake.db/metadata/' },
+            ],
+          };
+        }
+        return { KeyCount: 0, Contents: [] };
+      },
+    };
+
+    const s3Adapter = new S3Adapter(testLogger);
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://test-bucket/datalake.db',
+      s3Config: {
+        client: mockS3Client as any,
+        bucket: 'test-bucket',
+        keyPrefix: 'datalake.db',
+      },
+    };
+
+    // emptyTable with only 0-byte directory marker returns false
+    const isEmptyTab = await s3Adapter.isTable(handle, 's3://test-bucket/datalake.db/emptyTable');
+    assert.strictEqual(isEmptyTab, false, 'expected empty directory with only marker to not be a table');
+
+    // realTable with metadata file returns true
+    const isRealTab = await s3Adapter.isTable(handle, 's3://test-bucket/datalake.db/realTable');
+    assert.strictEqual(isRealTab, true, 'expected real table with metadata file to be a table');
+
+    // listTables filters out /metadata
+    const tables = await s3Adapter.listTables(handle, 's3://test-bucket/datalake.db');
+    assert.ok(Array.isArray(tables));
+    assert.deepStrictEqual(tables, [
+      's3://test-bucket/datalake.db/emptyTable',
+      's3://test-bucket/datalake.db/realTable',
+    ]);
+  });
+
+  // ── Test 27: TreeView does not mark empty table directory as table and filters phantom children ──
+  await run('TreeView does not mark empty table directory as table and filters phantom children', async () => {
+    const adapter = makeAdapter({
+      async listTables(_handle, schemaPath) {
+        if (schemaPath === '/warehouse/datalake.db') {
+          return ['/warehouse/datalake.db/emptyTable', '/warehouse/datalake.db/realTable'];
+        }
+        if (schemaPath === '/warehouse/datalake.db/emptyTable') {
+          // Subdirectories under emptyTable are data and metadata
+          return ['/warehouse/datalake.db/emptyTable/data', '/warehouse/datalake.db/emptyTable/metadata'];
+        }
+        return [];
+      },
+      async isTable(_handle, tablePath) {
+        // emptyTable has no metadata files -> false
+        return tablePath === '/warehouse/datalake.db/realTable';
+      },
+    });
+
+    const provider = makeProvider(adapter);
+    provider.setActiveConnection(fakeHandle, adapter);
+    const { IcebergTreeItem: TreeItemClass } = await import('../tree/types.js');
+    const schemaItem = new TreeItemClass('datalake.db', 'schema', '/warehouse/datalake.db');
+
+    const children = await waitForChildren(provider, schemaItem as IcebergTreeItem);
+    assert.strictEqual(children.length, 2);
+
+    const emptyTableNode = children.find((c) => c.label === 'emptyTable');
+    assert.ok(emptyTableNode, 'emptyTable should be listed');
+    assert.strictEqual(emptyTableNode.nodeType, 'schema', 'emptyTable missing files must NOT be marked as table');
+
+    const realTableNode = children.find((c) => c.label === 'realTable');
+    assert.ok(realTableNode, 'realTable should be listed');
+    assert.strictEqual(realTableNode.nodeType, 'table', 'realTable with metadata must be marked as table');
+
+    // Expanding emptyTable (which is schema node) should filter out metadata and non-table data
+    const emptyChildren = await waitForChildren(provider, emptyTableNode as IcebergTreeItem);
+    assert.strictEqual(emptyChildren.length, 0, 'emptyTable should have 0 children (no phantom data/metadata schemas)');
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

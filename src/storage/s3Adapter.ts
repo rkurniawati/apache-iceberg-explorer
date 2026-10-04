@@ -66,7 +66,9 @@ export class S3Adapter implements StorageAdapter {
     const result = await this.listCommonPrefixes(handle, prefix);
     if (isStorageError(result)) return result;
 
-    return result.map((p) => `s3://${s3Config.bucket}/${p.replace(/\/$/, '')}`);
+    return result
+      .map((p) => `s3://${s3Config.bucket}/${p.replace(/\/$/, '')}`)
+      .filter((p) => !p.endsWith('/metadata'));
   }
 
   // -------------------------------------------------------------------------
@@ -295,11 +297,19 @@ export class S3Adapter implements StorageAdapter {
         new ListObjectsV2Command({
           Bucket: s3Config.bucket,
           Prefix: prefix,
-          MaxKeys: 1,
+          MaxKeys: 10,
         }),
       );
-      const hasKeys = (output.KeyCount ?? 0) > 0 || (output.Contents && output.Contents.length > 0);
-      return Boolean(hasKeys);
+      const contents = output.Contents ?? [];
+      const hasRealFiles = contents.some((obj) => {
+        const key = obj.Key;
+        if (!key) return false;
+        if (key === prefix || key === prefix.replace(/\/$/, '') || key.endsWith('/')) {
+          return false;
+        }
+        return true;
+      });
+      return hasRealFiles;
     } catch (raw) {
       const err = mapS3Error(raw);
       const name = (raw && typeof raw === 'object' && 'name' in raw) ? String((raw as { name: unknown }).name) : 'Error';
