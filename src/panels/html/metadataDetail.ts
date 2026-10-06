@@ -254,6 +254,7 @@ export function getMetadataDetailHtml(
   </div>
 
   <!-- Populated by section renderers when state transitions to 'loaded' -->
+  <div id="content-area">
     <div id="section-identity"      class="section"></div>
     <div id="section-view-sql"      class="section" style="display:none;"></div>
     <div id="section-view-versions" class="section" style="display:none;"></div>
@@ -296,9 +297,9 @@ export function getMetadataDetailHtml(
 
   function setState(state) {
     currentState = state;
-    elLoading.style.display = state === 'loading' ? 'flex'  : 'none';
-    elError.style.display   = state === 'error'   ? 'block' : 'none';
-    elContent.style.display = state === 'loaded'  ? 'block' : 'none';
+    if (elLoading) elLoading.style.display = state === 'loading' ? 'flex'  : 'none';
+    if (elError)   elError.style.display   = state === 'error'   ? 'block' : 'none';
+    if (elContent) elContent.style.display = state === 'loaded'  ? 'block' : 'none';
   }
 
   // Retry button posts a 'retry' message to the host (T-28)

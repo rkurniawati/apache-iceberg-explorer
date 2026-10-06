@@ -390,6 +390,17 @@ void (async () => {
     assert.doesNotThrow(() => {
       new vm.Script(scriptCode);
     }, 'Inline script must parse cleanly in JavaScript engine');
+
+    // Ensure all getElementById IDs referenced in the script exist in the HTML
+    const idRegex = /document\.getElementById\(['"]([^'"]+)['"]\)/g;
+    let match: RegExpExecArray | null;
+    while ((match = idRegex.exec(scriptCode)) !== null) {
+      const id = match[1];
+      assert.ok(
+        html.includes(`id="${id}"`),
+        `HTML must contain element with id="${id}" referenced by script`,
+      );
+    }
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────
