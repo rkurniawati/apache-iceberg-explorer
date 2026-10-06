@@ -76,12 +76,13 @@ export function getMetadataArchitectureHtml(
       background: var(--vscode-editor-background);
       border: 1px solid var(--vscode-editorWidget-border);
       border-radius: 4px;
-      padding: 0.5rem 0.75rem;
-      min-width: 170px;
+      padding: 0.6rem 0.85rem;
+      min-width: 280px;
+      flex-shrink: 0;
       cursor: pointer;
       display: flex;
       flex-direction: column;
-      gap: 0.25rem;
+      gap: 0.35rem;
       transition: border-color 0.15s ease;
     }
     .snap-chip:hover { border-color: var(--vscode-focusBorder); }
@@ -89,17 +90,35 @@ export function getMetadataArchitectureHtml(
       border-color: var(--vscode-textLink-foreground);
       box-shadow: 0 0 0 1px var(--vscode-textLink-foreground);
     }
-    .snap-chip-id { font-family: monospace; font-weight: 600; font-size: 0.85rem; }
-    .snap-chip-time { font-size: 0.75rem; color: var(--vscode-descriptionForeground); }
+    .snap-chip-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.75rem;
+      white-space: nowrap;
+    }
+    .snap-chip-id {
+      font-family: monospace;
+      font-weight: 600;
+      font-size: 0.85rem;
+      white-space: nowrap;
+    }
+    .snap-chip-time {
+      font-size: 0.75rem;
+      color: var(--vscode-descriptionForeground);
+      white-space: nowrap;
+    }
 
     .op-badge {
       display: inline-block;
-      padding: 0.1rem 0.4rem;
+      padding: 0.15rem 0.45rem;
       border-radius: 3px;
       font-size: 0.7rem;
       font-weight: 600;
       text-transform: uppercase;
-      align-self: flex-start;
+      white-space: nowrap;
+      flex-shrink: 0;
+      line-height: 1.2;
     }
     .op-append { background: #065f46; color: #34d399; }
     .op-overwrite { background: #9a3412; color: #fdba74; }
@@ -419,7 +438,7 @@ export function getMetadataArchitectureHtml(
         else if (op.includes('delete')) opClass = 'op-delete';
 
         chip.innerHTML = \`
-          <div style="display: flex; justify-content: space-between; align-items: center;">
+          <div class="snap-chip-header">
             <span class="snap-chip-id">#\${s.snapshotId}</span>
             <span class="op-badge \${opClass}">\${esc(s.operation || 'commit')}</span>
           </div>

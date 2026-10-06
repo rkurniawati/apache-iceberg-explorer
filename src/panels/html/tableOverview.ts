@@ -193,6 +193,8 @@ export function getTableOverviewHtml(
       font-size: 0.75rem;
       font-weight: 600;
       text-transform: uppercase;
+      white-space: nowrap;
+      flex-shrink: 0;
     }
     .op-append { background: #065f46; color: #34d399; }
     .op-overwrite { background: #9a3412; color: #fdba74; }
