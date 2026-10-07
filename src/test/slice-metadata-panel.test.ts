@@ -403,6 +403,127 @@ void (async () => {
     }
   });
 
+  await run('getMetadataDetailHtml contains raw JSON toggle button, container, and human-formatted elements', () => {
+    const html = getMetadataDetailHtml('test-nonce', 'vscode-resource:');
+    assert.ok(html.includes('id="toggle-raw-json-btn"'), 'Toggle button must exist in HTML');
+    assert.ok(html.includes('id="copy-raw-json-btn"'), 'Copy JSON button must exist in HTML');
+    assert.ok(html.includes('id="raw-json-container"'), 'Raw JSON container must exist in HTML');
+    assert.ok(html.includes('id="raw-json-code"'), 'Raw JSON code element must exist in HTML');
+    assert.ok(html.includes('id="raw-json-stats"'), 'Raw JSON stats element must exist in HTML');
+    assert.ok(html.includes('class="json-key"'), 'Syntax highlighting class for keys must be defined in CSS');
+    assert.ok(html.includes('class="json-string"'), 'Syntax highlighting class for strings must be defined in CSS');
+  });
+
+  await run('client script formats raw JSON for humans and toggles between structured and raw views', () => {
+    const html = getMetadataDetailHtml('test-nonce', 'vscode-resource:');
+    const scriptMatch = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);
+    assert.ok(scriptMatch, 'Inline script tag must exist');
+    const scriptCode = scriptMatch[1];
+
+    const elements: Record<string, any> = {};
+    function getEl(id: string) {
+      if (!elements[id]) {
+        elements[id] = {
+          id,
+          style: {} as Record<string, string>,
+          classList: {
+            classes: new Set<string>(),
+            add(c: string) { this.classes.add(c); },
+            remove(c: string) { this.classes.delete(c); },
+            contains(c: string) { return this.classes.has(c); },
+          },
+          attributes: {} as Record<string, string>,
+          setAttribute(k: string, v: string) { this.attributes[k] = v; },
+          getAttribute(k: string) { return this.attributes[k]; },
+          listeners: {} as Record<string, Function>,
+          addEventListener(type: string, fn: Function) { this.listeners[type] = fn; },
+          click() { if (this.listeners['click']) this.listeners['click']({ target: this }); },
+          textContent: '',
+          innerHTML: '',
+          dataset: {},
+          appendChild() {},
+          closest() { return null; },
+        };
+      }
+      return elements[id];
+    }
+
+    let postedMessages: any[] = [];
+    let savedState: any = null;
+    let messageListener: any = null;
+
+    const sandbox = {
+      console,
+      acquireVsCodeApi: () => ({
+        postMessage: (m: any) => postedMessages.push(m),
+        getState: () => savedState,
+        setState: (s: any) => { savedState = s; },
+      }),
+      document: {
+        getElementById: (id: string) => getEl(id),
+        createElement: () => ({ addEventListener() {}, appendChild() {}, style: {} }),
+      },
+      window: {
+        addEventListener: (type: string, fn: any) => {
+          if (type === 'message') messageListener = fn;
+        },
+      },
+      TextEncoder,
+    };
+
+    vm.createContext(sandbox);
+    vm.runInContext(scriptCode, sandbox);
+
+    assert.strictEqual(postedMessages.length, 1);
+    assert.strictEqual(postedMessages[0].type, 'webviewReady');
+
+    // Deliver loadMetadata message
+    messageListener({
+      data: {
+        type: 'loadMetadata',
+        resourcePath: 's3://warehouse/db/events/metadata/v2.metadata.json',
+        payload: {
+          'format-version': 2,
+          'table-uuid': 'abc-123',
+          'location': 's3://warehouse/db/events',
+          'current-snapshot-id': 1001,
+          'properties': { 'write.format.default': 'parquet' },
+        },
+      },
+    });
+
+    // Default mode is structured view
+    assert.strictEqual(getEl('content-area').style.display, 'block');
+    assert.strictEqual(getEl('raw-json-container').style.display, 'none');
+    assert.strictEqual(getEl('toggle-raw-label').textContent, 'Raw JSON');
+    assert.strictEqual(getEl('copy-raw-json-btn').style.display, 'none');
+
+    // Human-formatted JSON checks: multi-line indented + syntax tokens + human stats
+    const rawHtml = getEl('raw-json-code').innerHTML;
+    assert.ok(rawHtml.includes('<span class="json-key">&quot;format-version&quot;</span>'), 'Keys must be highlighted');
+    assert.ok(rawHtml.includes('<span class="json-number">2</span>'), 'Numbers must be highlighted');
+    assert.ok(rawHtml.includes('<span class="json-string">&quot;abc-123&quot;</span>'), 'Strings must be highlighted');
+    assert.ok(getEl('raw-json-stats').textContent.includes('lines'), 'Stats must include human-readable line count');
+
+    // Click toggle button -> should switch to Raw JSON view
+    getEl('toggle-raw-json-btn').click();
+    assert.strictEqual(getEl('content-area').style.display, 'none');
+    assert.strictEqual(getEl('raw-json-container').style.display, 'block');
+    assert.strictEqual(getEl('toggle-raw-label').textContent, 'Structured View');
+    assert.strictEqual(getEl('copy-raw-json-btn').style.display, 'inline-flex');
+    assert.strictEqual(getEl('toggle-raw-json-btn').classList.contains('btn-active'), true);
+    assert.strictEqual(savedState.isRawView, true);
+
+    // Click toggle button again -> should switch back to Structured view
+    getEl('toggle-raw-json-btn').click();
+    assert.strictEqual(getEl('content-area').style.display, 'block');
+    assert.strictEqual(getEl('raw-json-container').style.display, 'none');
+    assert.strictEqual(getEl('toggle-raw-label').textContent, 'Raw JSON');
+    assert.strictEqual(getEl('copy-raw-json-btn').style.display, 'none');
+    assert.strictEqual(getEl('toggle-raw-json-btn').classList.contains('btn-active'), false);
+    assert.strictEqual(savedState.isRawView, false);
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

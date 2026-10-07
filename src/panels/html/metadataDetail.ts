@@ -86,7 +86,18 @@ export function getMetadataDetailHtml(
     .breadcrumb-link:hover { opacity: 0.8; }
     .breadcrumb-current { color: var(--vscode-editor-foreground); font-weight: 600; }
 
-    /* ── Format-version badge ───────────────────────────────────────────── */
+    /* ── Format-version badge & Top bar ────────────────────────────────── */
+    #top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+    #top-bar #format-version-badge {
+      margin-bottom: 0;
+    }
     #format-version-badge {
       display: inline-flex;
       align-items: center;
@@ -99,6 +110,88 @@ export function getMetadataDetailHtml(
       font-weight: 600;
       margin-bottom: 0.75rem;
     }
+    .view-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-left: auto;
+    }
+    button.btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.65rem;
+      font-size: 0.85em;
+      font-weight: 500;
+      border-radius: 3px;
+      cursor: pointer;
+      font-family: inherit;
+      border: 1px solid var(--vscode-button-border, transparent);
+      background: var(--vscode-button-secondaryBackground);
+      color: var(--vscode-button-secondaryForeground);
+      transition: opacity 0.15s ease;
+    }
+    button.btn:hover {
+      background: var(--vscode-button-secondaryHoverBackground);
+      opacity: 0.9;
+    }
+    button.btn.btn-active {
+      background: var(--vscode-badge-background);
+      color: var(--vscode-badge-foreground);
+      border-color: var(--vscode-focusBorder, transparent);
+    }
+
+    /* ── Raw JSON View (Formatted for Human) ────────────────────────────── */
+    #raw-json-container {
+      margin-top: 0.5rem;
+    }
+    .raw-json-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 0.5rem;
+      padding-bottom: 0.25rem;
+      border-bottom: 1px solid var(--vscode-editorWidget-border);
+    }
+    .raw-json-meta {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .raw-json-title {
+      font-weight: 700;
+      font-size: 1em;
+      color: var(--vscode-editor-foreground);
+    }
+    .raw-json-stats {
+      font-size: 0.85em;
+      color: var(--vscode-descriptionForeground);
+    }
+    .raw-json-pre {
+      background: var(--vscode-editor-background);
+      border: 1px solid var(--vscode-editorWidget-border);
+      border-radius: 4px;
+      padding: 1rem;
+      margin: 0;
+      overflow: auto;
+      max-height: 80vh;
+      font-family: var(--vscode-editor-font-family, monospace);
+      font-size: var(--vscode-editor-font-size, 12px);
+      line-height: 1.5;
+      tab-size: 2;
+      white-space: pre;
+      word-break: normal;
+    }
+    .raw-json-code {
+      font-family: inherit;
+      font-size: inherit;
+    }
+    /* Syntax highlighting tokens — all colours reference --vscode-* variables (NFR-9) */
+    .json-key     { color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-textLink-foreground)); font-weight: 600; }
+    .json-string  { color: var(--vscode-symbolIcon-stringForeground, var(--vscode-editor-foreground)); }
+    .json-number  { color: var(--vscode-symbolIcon-numberForeground, var(--vscode-editor-foreground)); }
+    .json-boolean { color: var(--vscode-symbolIcon-booleanForeground, var(--vscode-textLink-foreground)); font-weight: 600; }
+    .json-null    { color: var(--vscode-symbolIcon-nullForeground, var(--vscode-descriptionForeground)); font-style: italic; }
 
     /* ── Sections ───────────────────────────────────────────────────────── */
     .section {
@@ -238,8 +331,19 @@ export function getMetadataDetailHtml(
   <!-- FR-18: Breadcrumb bar — populated by webview script once resourcePath is known -->
   <div id="breadcrumb" aria-label="Navigation breadcrumb"></div>
 
-  <!-- FR-10i: Format-version badge — prominently placed above all sections -->
-  <div id="format-version-badge" style="display:none"></div>
+  <!-- Top bar: format-version badge + view mode toggle buttons -->
+  <div id="top-bar">
+    <!-- FR-10i: Format-version badge — prominently placed above all sections -->
+    <div id="format-version-badge" style="display:none"></div>
+    <div id="view-actions" class="view-actions" style="display:none;">
+      <button class="btn" id="toggle-raw-json-btn" type="button" aria-pressed="false" title="Toggle between structured view and formatted raw JSON">
+        <span id="toggle-raw-icon">{ }</span> <span id="toggle-raw-label">Raw JSON</span>
+      </button>
+      <button class="btn" id="copy-raw-json-btn" type="button" style="display:none;" title="Copy formatted raw JSON to clipboard">
+        📋 Copy JSON
+      </button>
+    </div>
+  </div>
 
   <!-- Loading / error / content states (design.md §2.3) -->
   <div id="loading-indicator" aria-live="polite">
@@ -266,6 +370,17 @@ export function getMetadataDetailHtml(
     <div id="section-properties"    class="section"></div>
   </div>
 
+  <!-- Raw JSON view (formatted for human) -->
+  <div id="raw-json-container" style="display:none;">
+    <div class="raw-json-header">
+      <div class="raw-json-meta">
+        <span class="raw-json-title">Raw Metadata JSON</span>
+        <span id="raw-json-stats" class="raw-json-stats"></span>
+      </div>
+    </div>
+    <pre class="raw-json-pre" id="raw-json-pre"><code id="raw-json-code" class="raw-json-code"></code></pre>
+  </div>
+
 <script nonce="${nonce}">
 (function () {
   'use strict';
@@ -276,14 +391,26 @@ export function getMetadataDetailHtml(
   // ── State machine ────────────────────────────────────────────────────────
   // Valid states: idle | loading | loaded | error | cancelled  (design.md §2.3.1)
   let currentState = 'idle';
+  let isRawView = false;
+  let currentRawJsonStr = '';
 
-  const elLoading   = document.getElementById('loading-indicator');
-  const elError     = document.getElementById('error-area');
-  const elContent   = document.getElementById('content-area');
-  const elErrorMsg  = document.getElementById('error-message');
-  const elRetryBtn  = document.getElementById('error-retry-btn');
-  const elFmtBadge  = document.getElementById('format-version-badge');
-  const elBreadcrumb = document.getElementById('breadcrumb');
+  const elLoading      = document.getElementById('loading-indicator');
+  const elError        = document.getElementById('error-area');
+  const elContent      = document.getElementById('content-area');
+  const elErrorMsg     = document.getElementById('error-message');
+  const elRetryBtn     = document.getElementById('error-retry-btn');
+  const elFmtBadge     = document.getElementById('format-version-badge');
+  const elBreadcrumb   = document.getElementById('breadcrumb');
+  const elTopBar       = document.getElementById('top-bar');
+  const elViewActions  = document.getElementById('view-actions');
+  const elToggleBtn    = document.getElementById('toggle-raw-json-btn');
+  const elToggleIcon   = document.getElementById('toggle-raw-icon');
+  const elToggleLabel  = document.getElementById('toggle-raw-label');
+  const elCopyBtn      = document.getElementById('copy-raw-json-btn');
+  const elRawContainer = document.getElementById('raw-json-container');
+  const elRawPre       = document.getElementById('raw-json-pre');
+  const elRawCode      = document.getElementById('raw-json-code');
+  const elRawStats     = document.getElementById('raw-json-stats');
 
   // Map error classes to the exact static strings from design.md §2.5.2
   const ERROR_MESSAGES = {
@@ -295,11 +422,66 @@ export function getMetadataDetailHtml(
     'internal':      'An unexpected error occurred. Please try again.',
   };
 
+  function updateViewDisplay() {
+    if (currentState !== 'loaded') {
+      if (elContent) elContent.style.display = 'none';
+      if (elRawContainer) elRawContainer.style.display = 'none';
+      return;
+    }
+    if (isRawView) {
+      if (elContent) elContent.style.display = 'none';
+      if (elRawContainer) elRawContainer.style.display = 'block';
+      if (elToggleBtn) {
+        elToggleBtn.classList.add('btn-active');
+        elToggleBtn.setAttribute('aria-pressed', 'true');
+      }
+      if (elToggleIcon) elToggleIcon.textContent = '📄';
+      if (elToggleLabel) elToggleLabel.textContent = 'Structured View';
+      if (elCopyBtn) elCopyBtn.style.display = 'inline-flex';
+    } else {
+      if (elContent) elContent.style.display = 'block';
+      if (elRawContainer) elRawContainer.style.display = 'none';
+      if (elToggleBtn) {
+        elToggleBtn.classList.remove('btn-active');
+        elToggleBtn.setAttribute('aria-pressed', 'false');
+      }
+      if (elToggleIcon) elToggleIcon.textContent = '{ }';
+      if (elToggleLabel) elToggleLabel.textContent = 'Raw JSON';
+      if (elCopyBtn) elCopyBtn.style.display = 'none';
+    }
+  }
+
   function setState(state) {
     currentState = state;
     if (elLoading) elLoading.style.display = state === 'loading' ? 'flex'  : 'none';
     if (elError)   elError.style.display   = state === 'error'   ? 'block' : 'none';
-    if (elContent) elContent.style.display = state === 'loaded'  ? 'block' : 'none';
+    if (elViewActions) elViewActions.style.display = state === 'loaded' ? 'inline-flex' : 'none';
+    updateViewDisplay();
+  }
+
+  // Toggle button toggles between structured and raw JSON views
+  if (elToggleBtn) {
+    elToggleBtn.addEventListener('click', function () {
+      isRawView = !isRawView;
+      updateViewDisplay();
+      var cur = vscode.getState() || {};
+      vscode.setState(Object.assign({}, cur, { isRawView: isRawView }));
+    });
+  }
+
+  // Copy button copies human-formatted raw JSON to clipboard
+  if (elCopyBtn) {
+    elCopyBtn.addEventListener('click', function () {
+      if (!currentRawJsonStr) { return; }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(currentRawJsonStr).catch(function () {});
+      }
+      var origText = elCopyBtn.textContent;
+      elCopyBtn.textContent = '✓ Copied!';
+      setTimeout(function () {
+        elCopyBtn.textContent = origText;
+      }, 2000);
+    });
   }
 
   // Retry button posts a 'retry' message to the host (T-28)
@@ -317,6 +499,9 @@ export function getMetadataDetailHtml(
 
   const previousState = vscode.getState();
   if (previousState?.type === 'loadMetadata' && previousState.payload) {
+    if (previousState.isRawView) {
+      isRawView = true;
+    }
     try {
       renderAll(previousState.payload, previousState.resourcePath);
       setState('loaded');
@@ -345,7 +530,12 @@ export function getMetadataDetailHtml(
         break;
 
       case 'loadMetadata':
-        vscode.setState({ type: 'loadMetadata', payload: msg.payload, resourcePath: msg.resourcePath });
+        vscode.setState({
+          type: 'loadMetadata',
+          payload: msg.payload,
+          resourcePath: msg.resourcePath,
+          isRawView: isRawView,
+        });
         try {
           renderAll(msg.payload, msg.resourcePath);
           setState('loaded');
@@ -443,6 +633,68 @@ export function getMetadataDetailHtml(
     renderSnapshots(payload);
     renderRefs(payload);
     renderProperties(payload);
+    renderRawJson(payload);
+    updateViewDisplay();
+  }
+
+  // ── Raw JSON formatter & syntax highlighter ──────────────────────────────
+
+  function highlightJson(str) {
+    try {
+      var lastIdx = 0;
+      var html = '';
+      var regex = /("(?:\\\\u[a-zA-Z0-9]{4}|\\\\[^u]|[^\\\\"])*")(\\s*:)?|\\b(true|false|null)\\b|-?\\d+(?:\\.\\d*)?(?:[eE][+\\-]?\\d+)?/g;
+      var m;
+      while ((m = regex.exec(str)) !== null) {
+        if (m.index > lastIdx) {
+          html += esc(str.substring(lastIdx, m.index));
+        }
+        lastIdx = regex.lastIndex;
+        if (m[1]) {
+          if (m[2]) {
+            html += '<span class="json-key">' + esc(m[1]) + '</span>' + esc(m[2]);
+          } else {
+            html += '<span class="json-string">' + esc(m[1]) + '</span>';
+          }
+        } else if (m[3]) {
+          var cls = m[3] === 'null' ? 'json-null' : 'json-boolean';
+          html += '<span class="' + cls + '">' + m[3] + '</span>';
+        } else {
+          html += '<span class="json-number">' + esc(m[0]) + '</span>';
+        }
+      }
+      if (lastIdx < str.length) {
+        html += esc(str.substring(lastIdx));
+      }
+      return html;
+    } catch (_) {
+      return esc(str);
+    }
+  }
+
+  function renderRawJson(payload) {
+    var parsed = payload;
+    if (typeof payload === 'string') {
+      try { parsed = JSON.parse(payload); } catch (_) {}
+    }
+    var str = JSON.stringify(parsed, null, 2);
+    currentRawJsonStr = str;
+
+    var lines = str.split(/\\r?\\n/).length;
+    var bytes = typeof TextEncoder !== 'undefined'
+      ? new TextEncoder().encode(str).length
+      : str.length;
+    var sizeStr = bytes < 1024
+      ? bytes + ' B'
+      : (bytes / 1024).toFixed(1) + ' KB';
+
+    if (elRawStats) {
+      elRawStats.textContent = '(' + lines.toLocaleString() + ' lines, ' + sizeStr + ')';
+    }
+
+    if (elRawCode) {
+      elRawCode.innerHTML = highlightJson(str);
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
