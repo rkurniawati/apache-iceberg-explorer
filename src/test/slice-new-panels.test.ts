@@ -355,6 +355,9 @@ async function runTests() {
     assert.strictEqual(lastMsg.type, 'loadMetadataArchitecture');
     assert.strictEqual(lastMsg.currentSnapshotId, '1001');
     assert.strictEqual(lastMsg.snapshots.length, 2);
+    assert.ok(lastMsg.availableMetadataFiles, 'availableMetadataFiles present');
+    assert.strictEqual(lastMsg.availableMetadataFiles.length, 1);
+    assert.strictEqual(lastMsg.availableMetadataFiles[0].isLatest, true);
     assert.ok(lastMsg.activeSnapshot, 'Active snapshot data present');
     assert.strictEqual(lastMsg.activeSnapshot.snapshotId, '1001');
     assert.strictEqual(lastMsg.activeSnapshot.manifests.length, 1);
@@ -383,11 +386,14 @@ async function runTests() {
     assert.strictEqual(manifestFilesMsg.files[0].status, 'ADDED');
   });
 
-  await test('Metadata Architecture DAG: HTML does not contain inline onclick handlers (CSP compliant)', () => {
+  await test('Metadata Architecture DAG: HTML includes Snapshot Manifest Hierarchy and metadata version switcher', () => {
     const html = getMetadataArchitectureHtml('test-nonce', 'vscode-resource:', 's3://warehouse/db/events');
     assert.ok(!html.includes('onclick='), 'No inline onclick handler in HTML');
     assert.ok(html.includes('preview-btn'), 'Includes preview-btn class for delegated preview click handling');
     assert.ok(html.includes("'openParquetPreview'"), 'Includes openParquetPreview event posting');
+    assert.ok(html.includes('Snapshot Manifest Hierarchy'), 'Includes Snapshot Manifest Hierarchy section title');
+    assert.ok(html.includes('meta-file-select'), 'Includes metadata file selector dropdown');
+    assert.ok(html.includes('view-meta-json-btn'), 'Includes View JSON Details button');
   });
 
   await test('Metadata Architecture DAG: openParquetPreview message opens parquet preview panel', async () => {
@@ -411,6 +417,66 @@ async function runTests() {
     });
 
     assert.strictEqual(openedResource, 's3://warehouse/db/events/data/file1.parquet');
+  });
+
+  await test('Metadata Architecture DAG: openMetadataPanel message opens metadata detail panel', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter();
+    const qe = makeQueryEngine();
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    let openedMetaResource: string | undefined;
+    (manager as any).openMetadataDetailPanel = async (res: string) => {
+      openedMetaResource = res;
+    };
+
+    await manager.openMetadataArchitecturePanel('s3://warehouse/db/events', handle, adapter);
+    const key = panelRegistryKey(PanelType.MetadataArchitecture, 's3://warehouse/db/events');
+    const record = (manager as any).registry.get(key);
+
+    (record.panel.webview as any)._receiveMessage({
+      type: 'openMetadataPanel',
+      resourcePath: 's3://warehouse/db/events/metadata/v1.metadata.json',
+    });
+
+    assert.strictEqual(openedMetaResource, 's3://warehouse/db/events/metadata/v1.metadata.json');
+  });
+
+  await test('Metadata Architecture DAG: selectArchitectureMetadataFile switches metadata version', async () => {
+    const logger = makeLogger();
+    const adapter = makeStorageAdapter({
+      async listMetadataVersions() {
+        return [
+          { resourcePath: 's3://warehouse/db/events/metadata/v2.metadata.json', label: 'v2.metadata.json', sortKey: 2 },
+          { resourcePath: 's3://warehouse/db/events/metadata/v1.metadata.json', label: 'v1.metadata.json', sortKey: 1 },
+        ];
+      },
+    });
+    const qe = makeQueryEngine();
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger, qe as any);
+
+    await manager.openMetadataArchitecturePanel('s3://warehouse/db/events', handle, adapter);
+    const key = panelRegistryKey(PanelType.MetadataArchitecture, 's3://warehouse/db/events');
+    const record = (manager as any).registry.get(key);
+
+    const messages: PostedMessage[] = [];
+    record.gate.post = (msg: PostedMessage) => messages.push(msg);
+
+    (record.panel.webview as any)._receiveMessage({
+      type: 'selectArchitectureMetadataFile',
+      tablePath: 's3://warehouse/db/events',
+      metadataPath: 's3://warehouse/db/events/metadata/v1.metadata.json',
+    });
+
+    // Wait microtask
+    await new Promise((r) => setImmediate(r));
+
+    const metaArchMsg = messages.find(m => m.type === 'loadMetadataArchitecture') as any;
+    assert.ok(metaArchMsg, 'loadMetadataArchitecture message received after version switch');
+    assert.strictEqual(metaArchMsg.metadataFile, 's3://warehouse/db/events/metadata/v1.metadata.json');
+    assert.strictEqual(metaArchMsg.availableMetadataFiles?.length, 2);
+    assert.strictEqual(metaArchMsg.availableMetadataFiles[0].isLatest, true);
+    assert.strictEqual(metaArchMsg.availableMetadataFiles[1].isLatest, false);
   });
 
   await test('Metadata Architecture DAG: reveals metadata node path in tree view', async () => {

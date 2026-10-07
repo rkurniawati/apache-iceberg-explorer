@@ -37,6 +37,7 @@ import type {
   DiscoveredSchemaItem,
   ManifestArchitectureCard,
   ManifestDataFileEntry,
+  MetadataArchitectureVersionItem,
 } from './messages.js';
 import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
 import type { QueryEngine, ManifestEntryRow, DataFileRow, QueryError } from '../query/index.js';
@@ -1851,6 +1852,7 @@ export class WebviewPanelManager {
     tablePath: string,
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
+    targetMetadataPath?: string,
   ): Promise<void> {
     const cleanTablePath = tablePath.replace(/\/metadata\/?$/, '');
     const metadataPath = `${cleanTablePath}/metadata`;
@@ -1865,7 +1867,11 @@ export class WebviewPanelManager {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=metadataArchitecture resource=${cleanTablePath}`);
       if (existing.gate) {
-        existing.gate.repost();
+        if (targetMetadataPath) {
+          void this.loadMetadataArchitecture(existing.gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
+        } else {
+          existing.gate.repost();
+        }
       }
       return;
     }
@@ -1919,8 +1925,14 @@ export class WebviewPanelManager {
           case 'openTableOverview':
             void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
             break;
+          case 'openMetadataPanel':
+            void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
+            break;
           case 'selectArchitectureSnapshot':
-            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, msg.snapshotId);
+            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, msg.snapshotId, msg.metadataPath);
+            break;
+          case 'selectArchitectureMetadataFile':
+            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, undefined, msg.metadataPath);
             break;
           case 'fetchManifestDataFiles':
             void this.loadManifestDataFiles(gate, msg.manifestPath, handle, effectiveAdapter);
@@ -1935,7 +1947,7 @@ export class WebviewPanelManager {
     );
 
     this.logger.info(`Panel opened: type=metadataArchitecture resource=${cleanTablePath}`);
-    await this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter);
+    await this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
   }
 
   // ── Helper loading methods ──────────────────────────────────────────────────
@@ -2375,6 +2387,7 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter,
     targetSnapshotId?: string,
+    targetMetadataPath?: string,
   ): Promise<void> {
     gate.post({ type: 'setState', state: 'loading' });
 
@@ -2407,8 +2420,10 @@ export class WebviewPanelManager {
       return;
     }
 
-    const latest = versions[0];
-    const meta = await adapter.fetchMetadataJson(handle, latest.resourcePath);
+    const selectedVersion = (targetMetadataPath
+      ? versions.find(v => v.resourcePath === targetMetadataPath)
+      : undefined) ?? versions[0];
+    const meta = await adapter.fetchMetadataJson(handle, selectedVersion.resourcePath);
     if (isStorageError(meta)) {
       const msg = ERROR_MESSAGES[meta.class] ?? ERROR_MESSAGES['internal'];
       gate.post({ type: 'setState', state: 'error', errorClass: meta.class, message: msg });
@@ -2464,10 +2479,17 @@ export class WebviewPanelManager {
       }
     }
 
+    const availableMetadataFiles: MetadataArchitectureVersionItem[] = versions.map((v, i) => ({
+      label: v.label,
+      resourcePath: v.resourcePath,
+      isLatest: i === 0,
+    }));
+
     gate.post({
       type: 'loadMetadataArchitecture',
       tablePath,
-      metadataFile: latest.resourcePath,
+      metadataFile: selectedVersion.resourcePath,
+      availableMetadataFiles,
       currentSnapshotId,
       snapshots,
       activeSnapshot: activeSnapshotData,

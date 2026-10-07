@@ -184,10 +184,17 @@ export interface ManifestArchitectureCard {
   partitionSummary: string;
 }
 
+export interface MetadataArchitectureVersionItem {
+  label: string;
+  resourcePath: string;
+  isLatest: boolean;
+}
+
 export interface LoadMetadataArchitectureMessage {
   type: 'loadMetadataArchitecture';
   tablePath: string;
   metadataFile: string;
+  availableMetadataFiles?: MetadataArchitectureVersionItem[];
   currentSnapshotId: string | null;
   snapshots: SnapshotSummaryItem[];
   activeSnapshot: {
@@ -311,6 +318,13 @@ export interface SelectArchitectureSnapshotMessage {
   type: 'selectArchitectureSnapshot';
   tablePath: string;
   snapshotId: string;
+  metadataPath?: string;
+}
+
+export interface SelectArchitectureMetadataFileMessage {
+  type: 'selectArchitectureMetadataFile';
+  tablePath: string;
+  metadataPath: string;
 }
 
 export interface FetchManifestDataFilesMessage {
@@ -335,5 +349,6 @@ export type WebviewMessage =
   | OpenConnectionDashboardMessage
   | FetchDataPreviewMessage
   | SelectArchitectureSnapshotMessage
+  | SelectArchitectureMetadataFileMessage
   | FetchManifestDataFilesMessage;
 

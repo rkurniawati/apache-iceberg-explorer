@@ -2,7 +2,7 @@
  * Metadata Architecture DAG Panel — HTML shell and client-side renderer.
  *
  * Implements:
- *  - Architecture Lineage DAG for the latest snapshot (Metadata -> Snapshot -> Manifest List -> Manifests)
+ *  - Snapshot Manifest Hierarchy DAG for the selected snapshot (Metadata -> Snapshot -> Manifest List -> Manifests)
  *  - Paginated commit timeline for snapshots (10 per page, prev/next)
  *  - Stop at Manifest level with on-demand drill down to data files
  */
@@ -218,6 +218,73 @@ export function getMetadataArchitectureHtml(
     }
     .dag-value { font-family: monospace; font-weight: 600; font-size: 0.9rem; }
 
+    .section-subtitle {
+      font-size: 0.82rem;
+      color: var(--vscode-descriptionForeground);
+      margin-top: -0.25rem;
+      margin-bottom: 0.6rem;
+    }
+    .dag-node-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
+      margin-bottom: 0.35rem;
+    }
+    .meta-controls {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .meta-select-label {
+      font-size: 0.75rem;
+      color: var(--vscode-descriptionForeground);
+    }
+    .meta-dropdown {
+      background: var(--vscode-dropdown-background, var(--vscode-input-background));
+      color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+      border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border));
+      padding: 0.2rem 0.5rem;
+      border-radius: 3px;
+      font-size: 0.78rem;
+      font-family: inherit;
+      cursor: pointer;
+      max-width: 260px;
+    }
+    .meta-dropdown:focus {
+      outline: 1px solid var(--vscode-focusBorder);
+    }
+    .active-badge {
+      display: inline-block;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+    .meta-badge-container {
+      display: flex;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-top: 0.35rem;
+    }
+    .meta-pill {
+      font-size: 0.72rem;
+      padding: 0.15rem 0.45rem;
+      border-radius: 3px;
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+    .meta-pill.historical {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border-color: rgba(245, 158, 11, 0.3);
+    }
+
     /* ── Manifest Cards ─────────────────────────────────────────────────── */
     .manifests-section {
       width: 100%;
@@ -308,7 +375,7 @@ export function getMetadataArchitectureHtml(
       <div>
         <h1>Metadata Architecture DAG</h1>
         <div style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin-top: 0.2rem;">
-          Focused on the latest snapshot commit. Click any commit to view its manifest hierarchy.
+          Iceberg metadata structure. Click any snapshot commit to view its manifest hierarchy.
         </div>
       </div>
       <div>
@@ -320,6 +387,9 @@ export function getMetadataArchitectureHtml(
     <div class="section-title">
       <span>Snapshot Commits Timeline (<span id="total-commits">0</span> total)</span>
     </div>
+    <div class="section-subtitle">
+      Select a snapshot commit below to inspect its manifest hierarchy in the diagram.
+    </div>
     <div class="timeline-container">
       <div class="timeline-scroll" id="timeline-scroll"></div>
       <div class="pagination-controls">
@@ -329,22 +399,36 @@ export function getMetadataArchitectureHtml(
       </div>
     </div>
 
-    <!-- Section 2: Architecture DAG for Selected Snapshot -->
+    <!-- Section 2: Snapshot Manifest Hierarchy -->
     <div class="section-title">
-      <span>Architecture Lineage (Snapshot <span id="selected-snap-label" style="font-family: monospace;">#—</span>)</span>
+      <span>Snapshot Manifest Hierarchy (Snapshot <span id="selected-snap-label" style="font-family: monospace;">#—</span>)</span>
+    </div>
+    <div class="section-subtitle">
+      Manifest list and manifests associated with the snapshot selected above.
     </div>
     <div class="dag-container">
       <!-- 1. Metadata JSON -->
       <div class="dag-node dag-node-meta">
-        <div class="dag-label">Table Metadata File</div>
+        <div class="dag-node-header">
+          <div class="dag-label">Table Metadata File</div>
+          <div class="meta-controls">
+            <label for="meta-file-select" class="meta-select-label">Version:</label>
+            <select id="meta-file-select" class="meta-dropdown" title="Select Metadata JSON version" aria-label="Select Metadata JSON version"></select>
+            <button class="btn btn-secondary action-link" id="view-meta-json-btn" title="Open this metadata JSON in the Metadata Detail view">View JSON Details ↗</button>
+          </div>
+        </div>
         <div class="dag-value" id="node-meta-file">vN.metadata.json</div>
+        <div id="node-meta-badge" class="meta-badge-container"></div>
       </div>
 
       <div class="dag-arrow">&darr;</div>
 
       <!-- 2. Snapshot -->
       <div class="dag-node dag-node-snap">
-        <div class="dag-label">Selected Snapshot</div>
+        <div class="dag-node-header">
+          <div class="dag-label">Selected Snapshot</div>
+          <span class="active-badge" id="snap-active-badge">Selected in Timeline</span>
+        </div>
         <div class="dag-value" id="node-snap-id">Snapshot #—</div>
         <div id="node-snap-meta" style="font-size: 0.8rem; color: var(--vscode-descriptionForeground); margin-top: 0.25rem;"></div>
       </div>
@@ -393,6 +477,27 @@ export function getMetadataArchitectureHtml(
         vscode.postMessage({
           type: 'breadcrumbNavigate',
           segment: Number(btn.dataset.idx),
+        });
+      }
+    });
+
+    document.getElementById('view-meta-json-btn')?.addEventListener('click', () => {
+      if (currentArchitecture && currentArchitecture.metadataFile) {
+        vscode.postMessage({
+          type: 'openMetadataPanel',
+          resourcePath: currentArchitecture.metadataFile,
+        });
+      }
+    });
+
+    document.getElementById('meta-file-select')?.addEventListener('change', (e) => {
+      const target = e.target;
+      const selectedPath = target ? target.value : null;
+      if (selectedPath && currentArchitecture && selectedPath !== currentArchitecture.metadataFile) {
+        vscode.postMessage({
+          type: 'selectArchitectureMetadataFile',
+          tablePath: currentArchitecture.tablePath,
+          metadataPath: selectedPath,
         });
       }
     });
@@ -452,6 +557,7 @@ export function getMetadataArchitectureHtml(
             type: 'selectArchitectureSnapshot',
             tablePath: currentArchitecture.tablePath,
             snapshotId: s.snapshotId,
+            metadataPath: currentArchitecture.metadataFile,
           });
         });
         scroll.appendChild(chip);
@@ -560,7 +666,37 @@ export function getMetadataArchitectureHtml(
         selectedSnapshotId = msg.activeSnapshot ? msg.activeSnapshot.snapshotId : msg.currentSnapshotId;
         document.getElementById('selected-snap-label').textContent = selectedSnapshotId ? '#' + selectedSnapshotId : 'None';
 
-        document.getElementById('node-meta-file').textContent = msg.metadataFile.split('/').pop() || msg.metadataFile;
+        const metaFilename = msg.metadataFile.split('/').pop() || msg.metadataFile;
+        document.getElementById('node-meta-file').textContent = metaFilename;
+
+        // Populate metadata versions dropdown
+        const selectEl = document.getElementById('meta-file-select');
+        selectEl.innerHTML = '';
+        const avail = msg.availableMetadataFiles || [];
+        if (avail.length > 0) {
+          avail.forEach((v) => {
+            const opt = document.createElement('option');
+            opt.value = v.resourcePath;
+            opt.textContent = v.label + (v.isLatest ? ' (Latest)' : '');
+            if (v.resourcePath === msg.metadataFile) {
+              opt.selected = true;
+            }
+            selectEl.appendChild(opt);
+          });
+          selectEl.style.display = 'inline-block';
+        } else {
+          selectEl.style.display = 'none';
+        }
+
+        // Display version status badge
+        const badgeContainer = document.getElementById('node-meta-badge');
+        badgeContainer.innerHTML = '';
+        const curMetaInfo = avail.find((v) => v.resourcePath === msg.metadataFile);
+        const isLatest = curMetaInfo ? curMetaInfo.isLatest : true;
+        const pill = document.createElement('span');
+        pill.className = 'meta-pill' + (isLatest ? '' : ' historical');
+        pill.textContent = isLatest ? 'Latest Metadata Version' : 'Historical Metadata Version';
+        badgeContainer.appendChild(pill);
 
         if (msg.activeSnapshot) {
           document.getElementById('node-snap-id').textContent = 'Snapshot #' + msg.activeSnapshot.snapshotId;
