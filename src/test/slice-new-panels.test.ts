@@ -197,6 +197,7 @@ async function runTests() {
     assert.ok(html.includes('id="tab-snapshots"'), 'Contains Snapshots tab content');
     assert.ok(html.includes('id="schema-search"'), 'Contains schema filter input');
     assert.ok(html.includes('nonce="test-nonce"'), 'Nonce applied to scripts and styles');
+    assert.ok(html.includes("document.getElementById('table-name').textContent = (msg.isView ? 'View ' : 'Table ') + msg.tableName;"), 'Formats table header with Table prefix');
     assert.ok(html.includes('webviewReady'), 'Posts webviewReady on init');
   });
 

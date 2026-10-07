@@ -273,7 +273,7 @@ export function getTableOverviewHtml(
       <div class="actions-bar">
         <button class="btn" id="query-btn">🔍 Query SQL</button>
         <button class="btn btn-secondary" id="view-metadata-btn">📄 Metadata JSON</button>
-        <button class="btn btn-secondary" id="view-dag-btn">🏗️ Architecture DAG</button>
+        <button class="btn btn-secondary" id="view-dag-btn">🏗️ Metadata Structure</button>
       </div>
     </div>
 
@@ -606,7 +606,7 @@ export function getTableOverviewHtml(
         document.getElementById('error').style.display = 'none';
         document.getElementById('content').style.display = 'block';
 
-        document.getElementById('table-name').textContent = msg.tableName;
+        document.getElementById('table-name').textContent = (msg.isView ? 'View ' : 'Table ') + msg.tableName;
         const vBadge = document.getElementById('version-badge');
         if (msg.isView) {
           vBadge.textContent = 'VIEW (v' + msg.formatVersion + ')';
