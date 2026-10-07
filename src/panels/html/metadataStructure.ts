@@ -1,5 +1,5 @@
 /**
- * Metadata Architecture DAG Panel — HTML shell and client-side renderer.
+ * Metadata Structure Panel — HTML shell and client-side renderer.
  *
  * Implements:
  *  - Snapshot Manifest Hierarchy DAG for the selected snapshot (Metadata -> Snapshot -> Manifest List -> Manifests)
@@ -7,9 +7,9 @@
  *  - Stop at Manifest level with on-demand drill down to data files
  */
 import { escHtml, breadcrumbHtml, BREADCRUMB_CSS, TABLE_CSS } from './shared.js';
-import type { LoadMetadataArchitectureMessage, LoadManifestDataFilesMessage } from '../messages.js';
+import type { LoadMetadataStructureMessage, LoadManifestDataFilesMessage } from '../messages.js';
 
-export function getMetadataArchitectureHtml(
+export function getMetadataStructureHtml(
   nonce: string,
   cspSource: string,
   tablePath: string,
@@ -23,7 +23,7 @@ export function getMetadataArchitectureHtml(
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Metadata Architecture</title>
+  <title>Metadata Structure</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; }
     body {
@@ -361,11 +361,11 @@ export function getMetadataArchitectureHtml(
 
   <div id="loading">
     <div class="spinner"></div>
-    <div>Resolving Iceberg metadata architecture…</div>
+    <div>Resolving Iceberg metadata structure…</div>
   </div>
 
   <div id="error">
-    <div style="font-weight: 600; margin-bottom: 0.25rem;">Failed to load metadata architecture</div>
+    <div style="font-weight: 600; margin-bottom: 0.25rem;">Failed to load metadata structure</div>
     <div id="error-message"></div>
     <button class="btn btn-secondary" id="retry-btn" style="margin-top: 0.75rem;">Retry</button>
   </div>
@@ -373,7 +373,7 @@ export function getMetadataArchitectureHtml(
   <div id="content" style="display: none;">
     <div class="header-bar">
       <div>
-        <h1>Metadata Architecture DAG</h1>
+        <h1>Metadata Structure</h1>
         <div style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin-top: 0.2rem;">
           Iceberg metadata structure. Click any snapshot commit to view its manifest hierarchy.
         </div>
@@ -455,7 +455,7 @@ export function getMetadataArchitectureHtml(
     const vscode = acquireVsCodeApi();
     vscode.postMessage({ type: 'webviewReady' });
 
-    let currentArchitecture = null;
+    let currentStructure = null;
     let allSnapshots = [];
     let selectedSnapshotId = null;
     let timelinePage = 0;
@@ -466,8 +466,8 @@ export function getMetadataArchitectureHtml(
     });
 
     document.getElementById('open-overview-btn')?.addEventListener('click', () => {
-      if (currentArchitecture) {
-        vscode.postMessage({ type: 'openTableOverview', resourcePath: currentArchitecture.tablePath });
+      if (currentStructure) {
+        vscode.postMessage({ type: 'openTableOverview', resourcePath: currentStructure.tablePath });
       }
     });
 
@@ -482,10 +482,10 @@ export function getMetadataArchitectureHtml(
     });
 
     document.getElementById('view-meta-json-btn')?.addEventListener('click', () => {
-      if (currentArchitecture && currentArchitecture.metadataFile) {
+      if (currentStructure && currentStructure.metadataFile) {
         vscode.postMessage({
           type: 'openMetadataPanel',
-          resourcePath: currentArchitecture.metadataFile,
+          resourcePath: currentStructure.metadataFile,
         });
       }
     });
@@ -493,10 +493,10 @@ export function getMetadataArchitectureHtml(
     document.getElementById('meta-file-select')?.addEventListener('change', (e) => {
       const target = e.target;
       const selectedPath = target ? target.value : null;
-      if (selectedPath && currentArchitecture && selectedPath !== currentArchitecture.metadataFile) {
+      if (selectedPath && currentStructure && selectedPath !== currentStructure.metadataFile) {
         vscode.postMessage({
-          type: 'selectArchitectureMetadataFile',
-          tablePath: currentArchitecture.tablePath,
+          type: 'selectStructureMetadataFile',
+          tablePath: currentStructure.tablePath,
           metadataPath: selectedPath,
         });
       }
@@ -554,10 +554,10 @@ export function getMetadataArchitectureHtml(
           renderTimeline();
           document.getElementById('selected-snap-label').textContent = '#' + s.snapshotId;
           vscode.postMessage({
-            type: 'selectArchitectureSnapshot',
-            tablePath: currentArchitecture.tablePath,
+            type: 'selectStructureSnapshot',
+            tablePath: currentStructure.tablePath,
             snapshotId: s.snapshotId,
-            metadataPath: currentArchitecture.metadataFile,
+            metadataPath: currentStructure.metadataFile,
           });
         });
         scroll.appendChild(chip);
@@ -656,8 +656,8 @@ export function getMetadataArchitectureHtml(
           document.getElementById('error').style.display = 'none';
           document.getElementById('content').style.display = 'block';
         }
-      } else if (msg.type === 'loadMetadataArchitecture') {
-        currentArchitecture = msg;
+      } else if (msg.type === 'loadMetadataStructure' || msg.type === 'loadMetadataArchitecture') {
+        currentStructure = msg;
         document.getElementById('loading').style.display = 'none';
         document.getElementById('error').style.display = 'none';
         document.getElementById('content').style.display = 'block';
@@ -778,3 +778,7 @@ export function getMetadataArchitectureHtml(
 </body>
 </html>`;
 }
+
+/** @deprecated Use getMetadataStructureHtml */
+export const getMetadataArchitectureHtml = getMetadataStructureHtml;
+

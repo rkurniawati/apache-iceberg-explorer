@@ -139,37 +139,43 @@ export function registerTreeCommands(
     ),
   );
 
-  // ── icebergExplorer.openMetadataArchitecture ────────────────────────────
+  // ── icebergExplorer.openMetadataStructure ──────────────────────────────
   // Arguments: [tablePath: string] or [item: IcebergTreeItem] and optional [targetMetadataPath?: string]
+  const openMetadataStructureHandler = async (tablePathOrItem: string | IcebergTreeItem, targetMetadataPath?: string) => {
+    let tablePath: string;
+    let effectiveMetaPath = targetMetadataPath;
+    if (typeof tablePathOrItem === 'string') {
+      if (tablePathOrItem.endsWith('.metadata.json')) {
+        effectiveMetaPath = tablePathOrItem;
+        tablePath = tablePathOrItem.replace(/\/metadata\/[^/]+$/, '');
+      } else {
+        tablePath = tablePathOrItem;
+      }
+    } else {
+      if (tablePathOrItem.contextValue === 'metadataVersion') {
+        effectiveMetaPath = tablePathOrItem.resourcePath;
+        tablePath = (tablePathOrItem.parentPath || '').replace(/\/metadata\/?$/, '');
+      } else {
+        tablePath = tablePathOrItem.resourcePath;
+      }
+    }
+    logger.info(`openMetadataStructure command: path=${tablePath} metaPath=${effectiveMetaPath}`);
+    const handle = provider.getActiveHandle();
+    if (!handle) {
+      logger.warn('openMetadataStructure: no active connection handle — ignoring');
+      return;
+    }
+    void panelManager.openMetadataStructurePanel(tablePath, handle, provider.getStorageAdapter(), effectiveMetaPath);
+  };
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
+      'icebergExplorer.openMetadataStructure',
+      openMetadataStructureHandler,
+    ),
+    vscode.commands.registerCommand(
       'icebergExplorer.openMetadataArchitecture',
-      async (tablePathOrItem: string | IcebergTreeItem, targetMetadataPath?: string) => {
-        let tablePath: string;
-        let effectiveMetaPath = targetMetadataPath;
-        if (typeof tablePathOrItem === 'string') {
-          if (tablePathOrItem.endsWith('.metadata.json')) {
-            effectiveMetaPath = tablePathOrItem;
-            tablePath = tablePathOrItem.replace(/\/metadata\/[^/]+$/, '');
-          } else {
-            tablePath = tablePathOrItem;
-          }
-        } else {
-          if (tablePathOrItem.contextValue === 'metadataVersion') {
-            effectiveMetaPath = tablePathOrItem.resourcePath;
-            tablePath = (tablePathOrItem.parentPath || '').replace(/\/metadata\/?$/, '');
-          } else {
-            tablePath = tablePathOrItem.resourcePath;
-          }
-        }
-        logger.info(`openMetadataArchitecture command: path=${tablePath} metaPath=${effectiveMetaPath}`);
-        const handle = provider.getActiveHandle();
-        if (!handle) {
-          logger.warn('openMetadataArchitecture: no active connection handle — ignoring');
-          return;
-        }
-        void panelManager.openMetadataArchitecturePanel(tablePath, handle, provider.getStorageAdapter(), effectiveMetaPath);
-      },
+      openMetadataStructureHandler,
     ),
   );
 

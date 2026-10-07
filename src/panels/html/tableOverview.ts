@@ -6,7 +6,7 @@
  *  - Schema & Column types table
  *  - Partition specifications
  *  - Embedded Data Preview with DuckDB-WASM
- *  - Snapshots list with link to Architecture DAG
+ *  - Snapshots list with link to Metadata Structure
  */
 import { escHtml, breadcrumbHtml, BREADCRUMB_CSS, TABLE_CSS } from './shared.js';
 import type { LoadTableOverviewMessage, LoadDataPreviewMessage } from '../messages.js';
@@ -424,7 +424,7 @@ export function getTableOverviewHtml(
 
     document.getElementById('view-dag-btn')?.addEventListener('click', () => {
       if (currentOverview) {
-        vscode.postMessage({ type: 'openMetadataArchitecture', resourcePath: currentOverview.tablePath });
+        vscode.postMessage({ type: 'openMetadataStructure', resourcePath: currentOverview.tablePath });
       }
     });
 

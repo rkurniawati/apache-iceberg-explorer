@@ -152,8 +152,8 @@ export function makeMetadataFolderItem(tablePath: string): IcebergTreeItem {
   );
   item.iconPath = new vscode.ThemeIcon('folder');
   item.command = {
-    command: 'icebergExplorer.openMetadataArchitecture',
-    title: 'Open Metadata Architecture',
+    command: 'icebergExplorer.openMetadataStructure',
+    title: 'Open Metadata Structure',
     arguments: [tablePath],
   };
   return item;

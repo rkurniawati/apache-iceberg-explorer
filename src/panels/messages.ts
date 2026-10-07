@@ -175,7 +175,7 @@ export interface SetDashboardFilterMessage {
   filter: string;
 }
 
-export interface ManifestArchitectureCard {
+export interface ManifestStructureCard {
   path: string;
   partitionSpecId: number;
   addedFiles: number;
@@ -183,26 +183,42 @@ export interface ManifestArchitectureCard {
   deletedFiles: number;
   partitionSummary: string;
 }
+export type ManifestArchitectureCard = ManifestStructureCard;
 
-export interface MetadataArchitectureVersionItem {
+export interface MetadataStructureVersionItem {
   label: string;
   resourcePath: string;
   isLatest: boolean;
 }
+export type MetadataArchitectureVersionItem = MetadataStructureVersionItem;
 
-export interface LoadMetadataArchitectureMessage {
-  type: 'loadMetadataArchitecture';
+export interface LoadMetadataStructureMessage {
+  type: 'loadMetadataStructure';
   tablePath: string;
   metadataFile: string;
-  availableMetadataFiles?: MetadataArchitectureVersionItem[];
+  availableMetadataFiles?: MetadataStructureVersionItem[];
   currentSnapshotId: string | null;
   snapshots: SnapshotSummaryItem[];
   activeSnapshot: {
     snapshotId: string;
     manifestList: string;
-    manifests: ManifestArchitectureCard[];
+    manifests: ManifestStructureCard[];
   } | null;
 }
+export interface LoadMetadataArchitectureLegacyMessage {
+  type: 'loadMetadataArchitecture';
+  tablePath: string;
+  metadataFile: string;
+  availableMetadataFiles?: MetadataStructureVersionItem[];
+  currentSnapshotId: string | null;
+  snapshots: SnapshotSummaryItem[];
+  activeSnapshot: {
+    snapshotId: string;
+    manifestList: string;
+    manifests: ManifestStructureCard[];
+  } | null;
+}
+export type LoadMetadataArchitectureMessage = LoadMetadataStructureMessage | LoadMetadataArchitectureLegacyMessage;
 
 export interface ManifestDataFileEntry {
   path: string;
@@ -232,7 +248,8 @@ export type PanelMessage =
   | LoadSchemaOverviewMessage
   | LoadDataPreviewMessage
   | LoadConnectionDashboardMessage
-  | LoadMetadataArchitectureMessage
+  | LoadMetadataStructureMessage
+  | LoadMetadataArchitectureLegacyMessage
   | LoadManifestDataFilesMessage
   | SetDashboardFilterMessage;
 
@@ -299,10 +316,15 @@ export interface OpenMetadataPanelMessage {
   resourcePath: string;
 }
 
-export interface OpenMetadataArchitectureMessage {
+export interface OpenMetadataStructureMessage {
+  type: 'openMetadataStructure';
+  resourcePath: string;
+}
+export interface OpenMetadataArchitectureLegacyMessage {
   type: 'openMetadataArchitecture';
   resourcePath: string;
 }
+export type OpenMetadataArchitectureMessage = OpenMetadataStructureMessage | OpenMetadataArchitectureLegacyMessage;
 
 export interface OpenConnectionDashboardMessage {
   type: 'openConnectionDashboard';
@@ -314,18 +336,31 @@ export interface FetchDataPreviewMessage {
   tablePath: string;
 }
 
-export interface SelectArchitectureSnapshotMessage {
+export interface SelectStructureSnapshotMessage {
+  type: 'selectStructureSnapshot';
+  tablePath: string;
+  snapshotId: string;
+  metadataPath?: string;
+}
+export interface SelectArchitectureSnapshotLegacyMessage {
   type: 'selectArchitectureSnapshot';
   tablePath: string;
   snapshotId: string;
   metadataPath?: string;
 }
+export type SelectArchitectureSnapshotMessage = SelectStructureSnapshotMessage | SelectArchitectureSnapshotLegacyMessage;
 
-export interface SelectArchitectureMetadataFileMessage {
+export interface SelectStructureMetadataFileMessage {
+  type: 'selectStructureMetadataFile';
+  tablePath: string;
+  metadataPath: string;
+}
+export interface SelectArchitectureMetadataFileLegacyMessage {
   type: 'selectArchitectureMetadataFile';
   tablePath: string;
   metadataPath: string;
 }
+export type SelectArchitectureMetadataFileMessage = SelectStructureMetadataFileMessage | SelectArchitectureMetadataFileLegacyMessage;
 
 export interface FetchManifestDataFilesMessage {
   type: 'fetchManifestDataFiles';
@@ -345,10 +380,13 @@ export type WebviewMessage =
   | OpenTableOverviewMessage
   | OpenSchemaOverviewMessage
   | OpenMetadataPanelMessage
-  | OpenMetadataArchitectureMessage
+  | OpenMetadataStructureMessage
+  | OpenMetadataArchitectureLegacyMessage
   | OpenConnectionDashboardMessage
   | FetchDataPreviewMessage
-  | SelectArchitectureSnapshotMessage
-  | SelectArchitectureMetadataFileMessage
+  | SelectStructureSnapshotMessage
+  | SelectArchitectureSnapshotLegacyMessage
+  | SelectStructureMetadataFileMessage
+  | SelectArchitectureMetadataFileLegacyMessage
   | FetchManifestDataFilesMessage;
 

@@ -67,8 +67,8 @@
         "category": "Iceberg Explorer"
       },
       {
-        "command": "icebergExplorer.openMetadataArchitecture",
-        "title": "Open Metadata Architecture",
+        "command": "icebergExplorer.openMetadataStructure",
+        "title": "Open Metadata Structure",
         "category": "Iceberg Explorer"
       }
     ],

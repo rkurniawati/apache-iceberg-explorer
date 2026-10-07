@@ -7,7 +7,9 @@ export enum PanelType {
   TableOverview = 'tableOverview',
   ConnectionDashboard = 'connectionDashboard',
   SchemaOverview = 'schemaOverview',
-  MetadataArchitecture = 'metadataArchitecture',
+  MetadataStructure = 'metadataStructure',
+  /** @deprecated Use MetadataStructure */
+  MetadataArchitecture = 'metadataStructure',
   ManifestList = 'manifestList',
   ManifestFile = 'manifestFile',
   ParquetPreview = 'parquetPreview',

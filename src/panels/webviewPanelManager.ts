@@ -28,15 +28,17 @@ import { getAdHocQueryHtml } from './html/adHocQuery.js';
 import { getTableOverviewHtml } from './html/tableOverview.js';
 import { getSchemaOverviewHtml } from './html/schemaOverview.js';
 import { getConnectionDashboardHtml } from './html/connectionDashboard.js';
-import { getMetadataArchitectureHtml } from './html/metadataArchitecture.js';
+import { getMetadataStructureHtml, getMetadataArchitectureHtml } from './html/metadataStructure.js';
 import type {
   TableColumnSummary,
   TablePartitionField,
   SnapshotSummaryItem,
   DiscoveredTableItem,
   DiscoveredSchemaItem,
+  ManifestStructureCard,
   ManifestArchitectureCard,
   ManifestDataFileEntry,
+  MetadataStructureVersionItem,
   MetadataArchitectureVersionItem,
 } from './messages.js';
 import { lastPathSegment, resourcePathToBreadcrumbs } from './utils.js';
@@ -1643,8 +1645,9 @@ export class WebviewPanelManager {
           case 'openMetadataPanel':
             void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
             break;
+          case 'openMetadataStructure':
           case 'openMetadataArchitecture':
-            void this.openMetadataArchitecturePanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openMetadataStructurePanel(msg.resourcePath, handle, effectiveAdapter);
             break;
           case 'fetchDataPreview':
             void this.loadDataPreview(gate, msg.tablePath, handle, effectiveAdapter);
@@ -1846,9 +1849,9 @@ export class WebviewPanelManager {
   }
 
   /**
-   * Open or reveal the Metadata Architecture DAG panel. (Phase 4)
+   * Open or reveal the Metadata Structure panel. (Phase 4)
    */
-  async openMetadataArchitecturePanel(
+  async openMetadataStructurePanel(
     tablePath: string,
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
@@ -1860,15 +1863,15 @@ export class WebviewPanelManager {
       void this.revealPath(metadataPath);
     }
     const effectiveAdapter = adapter ?? this.storageAdapter;
-    const key = panelRegistryKey(PanelType.MetadataArchitecture, cleanTablePath);
+    const key = panelRegistryKey(PanelType.MetadataStructure, cleanTablePath);
     const existing = this.registry.get(key);
 
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.One);
-      this.logger.info(`Panel revealed (already open): type=metadataArchitecture resource=${cleanTablePath}`);
+      this.logger.info(`Panel revealed (already open): type=metadataStructure resource=${cleanTablePath}`);
       if (existing.gate) {
         if (targetMetadataPath) {
-          void this.loadMetadataArchitecture(existing.gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
+          void this.loadMetadataStructure(existing.gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
         } else {
           existing.gate.repost();
         }
@@ -1878,15 +1881,15 @@ export class WebviewPanelManager {
 
     const title = lastPathSegment(cleanTablePath);
     const panel = vscode.window.createWebviewPanel(
-      PanelType.MetadataArchitecture,
-      `${title} — Architecture DAG`,
+      PanelType.MetadataStructure,
+      `${title} — Metadata Structure`,
       vscode.ViewColumn.One,
       { enableScripts: true, retainContextWhenHidden: true },
     );
 
-    const gate = new WebviewReadyGate(panel, this.logger, 'metadataArchitecture');
+    const gate = new WebviewReadyGate(panel, this.logger, 'metadataStructure');
     const nonce = generateNonce();
-    panel.webview.html = getMetadataArchitectureHtml(nonce, panel.webview.cspSource, cleanTablePath);
+    panel.webview.html = getMetadataStructureHtml(nonce, panel.webview.cspSource, cleanTablePath);
 
     const record: PanelRecord = { panel, resourcePath: cleanTablePath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
@@ -1917,7 +1920,7 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter);
+            void this.loadMetadataStructure(gate, cleanTablePath, handle, effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
             void this._handleBreadcrumbNavigate(cleanTablePath, msg.segment, handle, effectiveAdapter);
@@ -1928,11 +1931,13 @@ export class WebviewPanelManager {
           case 'openMetadataPanel':
             void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
             break;
+          case 'selectStructureSnapshot':
           case 'selectArchitectureSnapshot':
-            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, msg.snapshotId, msg.metadataPath);
+            void this.loadMetadataStructure(gate, msg.tablePath, handle, effectiveAdapter, msg.snapshotId, msg.metadataPath);
             break;
+          case 'selectStructureMetadataFile':
           case 'selectArchitectureMetadataFile':
-            void this.loadMetadataArchitecture(gate, msg.tablePath, handle, effectiveAdapter, undefined, msg.metadataPath);
+            void this.loadMetadataStructure(gate, msg.tablePath, handle, effectiveAdapter, undefined, msg.metadataPath);
             break;
           case 'fetchManifestDataFiles':
             void this.loadManifestDataFiles(gate, msg.manifestPath, handle, effectiveAdapter);
@@ -1946,8 +1951,18 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    this.logger.info(`Panel opened: type=metadataArchitecture resource=${cleanTablePath}`);
-    await this.loadMetadataArchitecture(gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
+    this.logger.info(`Panel opened: type=metadataStructure resource=${cleanTablePath}`);
+    await this.loadMetadataStructure(gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
+  }
+
+  /** @deprecated Use openMetadataStructurePanel */
+  async openMetadataArchitecturePanel(
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+    targetMetadataPath?: string,
+  ): Promise<void> {
+    return this.openMetadataStructurePanel(tablePath, handle, adapter, targetMetadataPath);
   }
 
   // ── Helper loading methods ──────────────────────────────────────────────────
@@ -2381,7 +2396,7 @@ export class WebviewPanelManager {
     });
   }
 
-  private async loadMetadataArchitecture(
+  private async loadMetadataStructure(
     gate: WebviewReadyGate,
     tablePath: string,
     handle: ActiveConnectionHandle,
@@ -2450,7 +2465,7 @@ export class WebviewPanelManager {
     const activeSnapId = targetSnapshotId ?? currentSnapshotId ?? (snapshots.length > 0 ? snapshots[0].snapshotId : null);
     const activeSnapObj = rawSnaps.find((s: any) => String(s['snapshot-id']) === activeSnapId) ?? (rawSnaps.length > 0 ? rawSnaps[rawSnaps.length - 1] : null);
 
-    let activeSnapshotData: { snapshotId: string; manifestList: string; manifests: ManifestArchitectureCard[] } | null = null;
+    let activeSnapshotData: { snapshotId: string; manifestList: string; manifests: ManifestStructureCard[] } | null = null;
 
     if (activeSnapObj && activeSnapObj['manifest-list'] && this.queryEngine) {
       const mlPath = String(activeSnapObj['manifest-list']);
@@ -2459,7 +2474,7 @@ export class WebviewPanelManager {
         try {
           const rows = await this.queryEngine.parseManifestList(mlTemp);
           if (!isQueryError(rows)) {
-            const manifests: ManifestArchitectureCard[] = rows.map(r => ({
+            const manifests: ManifestStructureCard[] = rows.map(r => ({
               path: r.manifestPath,
               partitionSpecId: r.partitionSpecId,
               addedFiles: r.addedFilesCount ?? 0,
@@ -2479,14 +2494,14 @@ export class WebviewPanelManager {
       }
     }
 
-    const availableMetadataFiles: MetadataArchitectureVersionItem[] = versions.map((v, i) => ({
+    const availableMetadataFiles: MetadataStructureVersionItem[] = versions.map((v, i) => ({
       label: v.label,
       resourcePath: v.resourcePath,
       isLatest: i === 0,
     }));
 
     gate.post({
-      type: 'loadMetadataArchitecture',
+      type: 'loadMetadataStructure',
       tablePath,
       metadataFile: selectedVersion.resourcePath,
       availableMetadataFiles,
@@ -2494,6 +2509,18 @@ export class WebviewPanelManager {
       snapshots,
       activeSnapshot: activeSnapshotData,
     });
+  }
+
+  /** @deprecated Use loadMetadataStructure */
+  private async loadMetadataArchitecture(
+    gate: WebviewReadyGate,
+    tablePath: string,
+    handle: ActiveConnectionHandle,
+    adapter: StorageAdapter,
+    targetSnapshotId?: string,
+    targetMetadataPath?: string,
+  ): Promise<void> {
+    return this.loadMetadataStructure(gate, tablePath, handle, adapter, targetSnapshotId, targetMetadataPath);
   }
 
   private async loadManifestDataFiles(
