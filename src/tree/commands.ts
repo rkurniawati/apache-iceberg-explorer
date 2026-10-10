@@ -84,6 +84,18 @@ export function registerTreeCommands(
           `retryTreeNode command: parentPath=${parentPath}`,
         );
         provider.clearCache(parentPath);
+        if (parentPath === '__root__') {
+          const activeId = provider.getActiveConnectionId();
+          const handle = provider.getActiveHandle();
+          if (activeId && handle) {
+            const config = listConnections().find((c) => c.id === activeId);
+            if (config) {
+              void panelManager.retryConnectionDashboardIfError(config, handle, provider.getStorageAdapter());
+            }
+          }
+        } else {
+          void panelManager.retryPanelIfError(parentPath, provider.getActiveHandle(), provider.getStorageAdapter());
+        }
       },
     ),
   );

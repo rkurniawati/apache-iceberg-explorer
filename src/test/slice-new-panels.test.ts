@@ -1127,6 +1127,78 @@ async function runTests() {
     assert.ok(schemaRecord, 'Schema overview opened from dashboard schema card');
   });
 
+  await test('Connection Dashboard: retrying by opening panel again reloads data if panel was in error state', async () => {
+    const logger = makeLogger();
+    let shouldFail = true;
+    const adapter = makeStorageAdapter({
+      async listSchemas() {
+        if (shouldFail) {
+          return { kind: 'StorageError', class: 'internal', message: 'Connection unavailable' };
+        }
+        return ['db'];
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger);
+    const config: ConnectionConfig = {
+      id: 'conn-retry-1',
+      label: 'Retry Warehouse',
+      connectionType: 's3',
+      warehousePath: 's3://warehouse',
+      sslVerification: true,
+      savedAt: 1000,
+    };
+
+    // First attempt fails
+    await manager.openConnectionDashboardPanel(config, handle, adapter);
+    const key = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-retry-1');
+    const record = (manager as any).registry.get(key);
+    assert.ok(record);
+    assert.strictEqual(record.gate.hasError(), true);
+
+    // Connection becomes available; user retries by clicking tree node (which calls openConnectionDashboardPanel)
+    shouldFail = false;
+    await manager.openConnectionDashboardPanel(config, handle, adapter);
+
+    assert.strictEqual(record.gate.hasError(), false);
+    const lastMsg = record.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
+    assert.strictEqual(lastMsg.schemasCount, 1);
+  });
+
+  await test('Connection Dashboard: retryConnectionDashboardIfError reloads data when panel is in error state', async () => {
+    const logger = makeLogger();
+    let shouldFail = true;
+    const adapter = makeStorageAdapter({
+      async listSchemas() {
+        if (shouldFail) {
+          return { kind: 'StorageError', class: 'internal', message: 'Connection unavailable' };
+        }
+        return ['db'];
+      },
+    });
+    const manager = new WebviewPanelManager(makeContext(), adapter, logger);
+    const config: ConnectionConfig = {
+      id: 'conn-retry-2',
+      label: 'Retry Warehouse 2',
+      connectionType: 's3',
+      warehousePath: 's3://warehouse',
+      sslVerification: true,
+      savedAt: 1000,
+    };
+
+    await manager.openConnectionDashboardPanel(config, handle, adapter);
+    const key = panelRegistryKey(PanelType.ConnectionDashboard, 'conn-retry-2');
+    const record = (manager as any).registry.get(key);
+    assert.strictEqual(record.gate.hasError(), true);
+
+    shouldFail = false;
+    await manager.retryConnectionDashboardIfError(config, handle, adapter);
+
+    assert.strictEqual(record.gate.hasError(), false);
+    const lastMsg = record.gate.getTerminalMessage() as any;
+    assert.strictEqual(lastMsg.type, 'loadConnectionDashboard');
+  });
+
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed\n`);
   if (failed > 0) {
     process.exit(1);

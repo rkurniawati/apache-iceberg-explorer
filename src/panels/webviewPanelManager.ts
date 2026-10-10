@@ -139,8 +139,15 @@ class WebviewReadyGate {
   /** Post a message — buffers it if the webview isn't ready yet. */
   post(msg: unknown): void {
     const type = (msg as { type?: string })?.type;
-    if (type && (type.startsWith('load') || (type === 'setState' && (msg as { state?: string }).state === 'error'))) {
+    const state = (msg as { state?: string })?.state;
+    if (type && type.startsWith('load')) {
       this.lastTerminalMessage = msg;
+    } else if (type === 'setState') {
+      if (state === 'error') {
+        this.lastTerminalMessage = msg;
+      } else if (state === 'loading') {
+        this.lastTerminalMessage = null;
+      }
     }
     if (this.ready) {
       void this.panel.webview.postMessage(msg);
@@ -158,6 +165,11 @@ class WebviewReadyGate {
 
   getTerminalMessage(): unknown | null {
     return this.lastTerminalMessage;
+  }
+
+  hasError(): boolean {
+    const msg = this.lastTerminalMessage as { type?: string; state?: string } | null;
+    return msg?.type === 'setState' && msg?.state === 'error';
   }
 }
 
@@ -224,14 +236,18 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(
         `Panel revealed (already open): type=metadataDetail resource=${resourcePath}`,
       );
-      if (existing.gate?.getTerminalMessage()) {
+      if (existing.gate?.hasError()) {
+        await this.loadMetadataPanel(existing.gate, resourcePath, handle, effectiveAdapter);
+      } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
-        await this.loadMetadataPanel(existing.gate, resourcePath, handle, existing.adapter);
+        await this.loadMetadataPanel(existing.gate, resourcePath, handle, effectiveAdapter);
       }
       return;
     }
@@ -324,9 +340,13 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = adapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=manifestList resource=${resourcePath}`);
-      if (existing.gate?.getTerminalMessage()) {
+      if (existing.gate?.hasError()) {
+        void this.loadManifestListPanel(existing.gate, key, resourcePath, handle, adapter);
+      } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
         void this.loadManifestListPanel(existing.gate, key, resourcePath, handle, adapter);
@@ -444,9 +464,13 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = adapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=manifestFile resource=${resourcePath}`);
-      if (existing.gate?.getTerminalMessage()) {
+      if (existing.gate?.hasError()) {
+        void this.loadManifestFilePanel(existing.gate, key, resourcePath, handle, adapter);
+      } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
         void this.loadManifestFilePanel(existing.gate, key, resourcePath, handle, adapter);
@@ -560,9 +584,13 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = adapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=parquetPreview resource=${resourcePath}`);
-      if (existing.gate?.getTerminalMessage()) {
+      if (existing.gate?.hasError()) {
+        void this.loadParquetPreviewPanel(existing.gate, key, resourcePath, handle, adapter);
+      } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
         void this.loadParquetPreviewPanel(existing.gate, key, resourcePath, handle, adapter);
@@ -1585,9 +1613,13 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=tableOverview resource=${tablePath}`);
-      if (existing.gate) {
+      if (existing.gate?.hasError()) {
+        await this.loadTableOverview(existing.gate, tablePath, handle, effectiveAdapter);
+      } else if (existing.gate) {
         existing.gate.repost();
       }
       return;
@@ -1634,23 +1666,23 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadTableOverview(gate, tablePath, handle, effectiveAdapter);
+            void this.loadTableOverview(gate, tablePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
-            void this._handleBreadcrumbNavigate(tablePath, msg.segment, handle, effectiveAdapter);
+            void this._handleBreadcrumbNavigate(tablePath, msg.segment, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openAdHocQuery':
-            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter, msg.initialSql);
+            void this.openAdHocQueryPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter, msg.initialSql);
             break;
           case 'openMetadataPanel':
-            void this.openMetadataDetailPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openMetadataDetailPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openMetadataStructure':
           case 'openMetadataArchitecture':
-            void this.openMetadataStructurePanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openMetadataStructurePanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'fetchDataPreview':
-            void this.loadDataPreview(gate, msg.tablePath, handle, effectiveAdapter);
+            void this.loadDataPreview(gate, msg.tablePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
         }
       },
@@ -1679,9 +1711,13 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=connectionDashboard resource=${config.id}`);
-      if (initialFilter !== undefined && existing.gate) {
+      if (existing.gate?.hasError()) {
+        await this.loadConnectionDashboard(existing.gate, config, handle, effectiveAdapter, initialFilter);
+      } else if (initialFilter !== undefined && existing.gate) {
         existing.gate.post({ type: 'setFilter', filter: initialFilter });
       } else if (existing.gate) {
         existing.gate.repost();
@@ -1729,16 +1765,16 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadConnectionDashboard(gate, config, handle, effectiveAdapter, initialFilter);
+            void this.loadConnectionDashboard(gate, config, record.handle, record.adapter ?? effectiveAdapter, initialFilter);
             break;
           case 'openAdHocQuery':
-            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openAdHocQueryPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openTableOverview':
-            void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openTableOverviewPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openSchemaOverview':
-            void this.openSchemaOverviewPanel(msg.schemaPath, handle, effectiveAdapter, msg.schemaName);
+            void this.openSchemaOverviewPanel(msg.schemaPath, record.handle, record.adapter ?? effectiveAdapter, msg.schemaName);
             break;
           case 'editConnection':
             void vscode.commands.executeCommand('icebergExplorer.openSettings', config.id);
@@ -1765,11 +1801,19 @@ export class WebviewPanelManager {
     if (this.revealPath) {
       void this.revealPath(schemaPath);
     }
+    const effectiveAdapter = adapter ?? this.storageAdapter;
     const key = panelRegistryKey(PanelType.SchemaOverview, schemaPath);
     const existing = this.registry.get(key);
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
       this.logger.info(`Panel revealed (already open): type=schemaOverview resource=${schemaPath}`);
       existing.panel.reveal();
+      if (existing.gate?.hasError()) {
+        await this.loadSchemaOverview(existing.gate, schemaPath, handle, effectiveAdapter, schemaName);
+      } else if (existing.gate) {
+        existing.gate.repost();
+      }
       return existing.panel;
     }
 
@@ -1786,7 +1830,6 @@ export class WebviewPanelManager {
       },
     );
 
-    const effectiveAdapter = adapter ?? this.storageAdapter;
     const gate = new WebviewReadyGate(panel, this.logger, 'schemaOverview');
     panel.webview.html = getSchemaOverviewHtml(nonce, panel.webview.cspSource, schemaPath);
 
@@ -1819,23 +1862,23 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadSchemaOverview(gate, schemaPath, handle, effectiveAdapter, schemaName);
+            void this.loadSchemaOverview(gate, schemaPath, record.handle, record.adapter ?? effectiveAdapter, schemaName);
             break;
           case 'breadcrumbNavigate':
-            void this._handleBreadcrumbNavigate(schemaPath, msg.segment, handle, effectiveAdapter);
+            void this._handleBreadcrumbNavigate(schemaPath, msg.segment, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openConnectionDashboard': {
-            const config = this._getConnectionConfig(handle, schemaPath);
+            const config = this._getConnectionConfig(record.handle, schemaPath);
             if (config) {
-              void this.openConnectionDashboardPanel(config, handle, effectiveAdapter);
+              void this.openConnectionDashboardPanel(config, record.handle, record.adapter ?? effectiveAdapter);
             }
             break;
           }
           case 'openTableOverview':
-            void this.openTableOverviewPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openTableOverviewPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'openAdHocQuery':
-            void this.openAdHocQueryPanel(msg.resourcePath, handle, effectiveAdapter);
+            void this.openAdHocQueryPanel(msg.resourcePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
         }
       },
@@ -1867,14 +1910,14 @@ export class WebviewPanelManager {
     const existing = this.registry.get(key);
 
     if (existing) {
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=metadataStructure resource=${cleanTablePath}`);
-      if (existing.gate) {
-        if (targetMetadataPath) {
-          void this.loadMetadataStructure(existing.gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
-        } else {
-          existing.gate.repost();
-        }
+      if (existing.gate && (existing.gate.hasError() || targetMetadataPath)) {
+        void this.loadMetadataStructure(existing.gate, cleanTablePath, handle, effectiveAdapter, undefined, targetMetadataPath);
+      } else if (existing.gate) {
+        existing.gate.repost();
       }
       return;
     }
@@ -1920,7 +1963,7 @@ export class WebviewPanelManager {
 
         switch (msg.type) {
           case 'retry':
-            void this.loadMetadataStructure(gate, cleanTablePath, handle, effectiveAdapter);
+            void this.loadMetadataStructure(gate, cleanTablePath, record.handle, record.adapter ?? effectiveAdapter);
             break;
           case 'breadcrumbNavigate':
             void this._handleBreadcrumbNavigate(cleanTablePath, msg.segment, handle, effectiveAdapter);
@@ -2576,6 +2619,54 @@ export class WebviewPanelManager {
       } catch {
         this.logger.warn(`Temp file deletion failed (already absent): ${f}`);
       }
+    }
+  }
+
+  /**
+   * Retry the connection dashboard for a config if the panel is open and in an error state.
+   */
+  async retryConnectionDashboardIfError(
+    config: ConnectionConfig,
+    handle: ActiveConnectionHandle,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    const key = panelRegistryKey(PanelType.ConnectionDashboard, config.id);
+    const existing = this.registry.get(key);
+    if (existing && existing.gate?.hasError()) {
+      const effectiveAdapter = adapter ?? this.storageAdapter;
+      existing.handle = handle;
+      existing.adapter = effectiveAdapter;
+      await this.loadConnectionDashboard(existing.gate, config, handle, effectiveAdapter);
+    }
+  }
+
+  /**
+   * Retry an open schema or table overview panel if it is currently in an error state.
+   */
+  async retryPanelIfError(
+    resourcePath: string,
+    handle: ActiveConnectionHandle | null,
+    adapter?: StorageAdapter,
+  ): Promise<void> {
+    if (!handle) { return; }
+    const effectiveAdapter = adapter ?? this.storageAdapter;
+
+    const schemaKey = panelRegistryKey(PanelType.SchemaOverview, resourcePath);
+    const schemaRecord = this.registry.get(schemaKey);
+    if (schemaRecord && schemaRecord.gate?.hasError()) {
+      schemaRecord.handle = handle;
+      schemaRecord.adapter = effectiveAdapter;
+      await this.loadSchemaOverview(schemaRecord.gate, resourcePath, handle, effectiveAdapter);
+      return;
+    }
+
+    const tableKey = panelRegistryKey(PanelType.TableOverview, resourcePath);
+    const tableRecord = this.registry.get(tableKey);
+    if (tableRecord && tableRecord.gate?.hasError()) {
+      tableRecord.handle = handle;
+      tableRecord.adapter = effectiveAdapter;
+      await this.loadTableOverview(tableRecord.gate, resourcePath, handle, effectiveAdapter);
+      return;
     }
   }
 }
