@@ -583,12 +583,15 @@ void (async () => {
     assert.strictEqual(child.resourcePath, '/warehouse/ns1/events/data/recordtype=0/timestamputc_month=2026-08');
   });
 
-  // ── Test 16: COMPLETE.gz filter (contract test) ───────────────────────────
-  await run('COMPLETE.gz filter (contract test) — adapter never returns COMPLETE.gz files', async () => {
+  // ── Test 16: Iceberg data file filter (contract test) ─────────────────────
+  await run('Iceberg data file filter (contract test) — adapter filters non-iceberg files by default and honors filter=all', async () => {
     // Adapter is responsible for filtering; stub represents the already-filtered result
     const adapter = makeAdapter({
-      async listDirectoryContents() {
-        // COMPLETE.gz files are never returned by the adapter — stub shows only what passes
+      async listDirectoryContents(_handle, _dirPath, options) {
+        if (options?.filter === 'all') {
+          return { subdirectories: [], files: ['data.parquet', 'skip.COMPLETE.gz', '_SUCCESS'] };
+        }
+        // Default ('iceberg-data') excludes non-Iceberg files
         return { subdirectories: [], files: ['data.parquet'] };
       },
     });
@@ -601,6 +604,7 @@ void (async () => {
     const items = await waitForChildren(provider, dataFolderItem as IcebergTreeItem);
     assert.strictEqual(items.length, 1, `expected 1 dataFile node, got ${items.length}`);
     assert.strictEqual((items[0] as IcebergTreeItem).nodeType, 'dataFile');
+    assert.strictEqual((items[0] as IcebergTreeItem).label, 'data.parquet');
   });
 
   // ── Test 17: Parquet file has preview command ─────────────────────────────
@@ -1009,6 +1013,75 @@ void (async () => {
     // Expanding emptyTable (which is schema node) should filter out metadata and non-table data
     const emptyChildren = await waitForChildren(provider, emptyTableNode as IcebergTreeItem);
     assert.strictEqual(emptyChildren.length, 0, 'emptyTable should have 0 children (no phantom data/metadata schemas)');
+  });
+
+  // ── Test 27: isIcebergDataFile correctly whitelists Iceberg data and delete file formats ──
+  await run('isIcebergDataFile correctly whitelists Iceberg data and delete file formats', async () => {
+    const { isIcebergDataFile } = await import('../storage/types.js');
+    // Valid Iceberg data files
+    assert.strictEqual(isIcebergDataFile('00000-1-uuid.parquet'), true);
+    assert.strictEqual(isIcebergDataFile('data.snappy.parquet'), true);
+    assert.strictEqual(isIcebergDataFile('DATA.PARQUET'), true);
+    assert.strictEqual(isIcebergDataFile('records.orc'), true);
+    assert.strictEqual(isIcebergDataFile('records.ORC'), true);
+    assert.strictEqual(isIcebergDataFile('events.avro'), true);
+    assert.strictEqual(isIcebergDataFile('events.AVRO'), true);
+
+    // Non-data files should be rejected
+    assert.strictEqual(isIcebergDataFile('batch.COMPLETE.gz'), false);
+    assert.strictEqual(isIcebergDataFile('archive.gz'), false);
+    assert.strictEqual(isIcebergDataFile('_SUCCESS'), false);
+    assert.strictEqual(isIcebergDataFile('.DS_Store'), false);
+    assert.strictEqual(isIcebergDataFile('.data.parquet.crc'), false);
+    assert.strictEqual(isIcebergDataFile('v1.metadata.json'), false);
+    assert.strictEqual(isIcebergDataFile('notes.txt'), false);
+  });
+
+  // ── Test 28: S3Adapter.listDirectoryContents filters with iceberg-data default and supports filter=all ──
+  await run('S3Adapter.listDirectoryContents filters with iceberg-data default and supports filter=all', async () => {
+    const mockS3Client = {
+      async send(command: any) {
+        return {
+          CommonPrefixes: [{ Prefix: 'datalake.db/tbl/data/part1/' }],
+          Contents: [
+            { Key: 'datalake.db/tbl/data/' }, // directory marker
+            { Key: 'datalake.db/tbl/data/00001.parquet' },
+            { Key: 'datalake.db/tbl/data/00002.orc' },
+            { Key: 'datalake.db/tbl/data/00003.avro' },
+            { Key: 'datalake.db/tbl/data/job.COMPLETE.gz' },
+            { Key: 'datalake.db/tbl/data/_SUCCESS' },
+            { Key: 'datalake.db/tbl/data/.DS_Store' },
+          ],
+        };
+      },
+    };
+    const s3Adapter = new S3Adapter(testLogger);
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://test-bucket/datalake.db',
+      s3Config: {
+        client: mockS3Client as any,
+        bucket: 'test-bucket',
+        keyPrefix: 'datalake.db',
+      },
+    };
+
+    const defaultResult = await s3Adapter.listDirectoryContents(handle, 's3://test-bucket/datalake.db/tbl/data');
+    assert.ok(!('kind' in defaultResult));
+    assert.deepStrictEqual(defaultResult.subdirectories, ['part1']);
+    assert.deepStrictEqual(defaultResult.files, ['00001.parquet', '00002.orc', '00003.avro']);
+
+    const allResult = await s3Adapter.listDirectoryContents(handle, 's3://test-bucket/datalake.db/tbl/data', { filter: 'all' });
+    assert.ok(!('kind' in allResult));
+    assert.deepStrictEqual(allResult.subdirectories, ['part1']);
+    assert.deepStrictEqual(allResult.files, [
+      '00001.parquet',
+      '00002.orc',
+      '00003.avro',
+      'job.COMPLETE.gz',
+      '_SUCCESS',
+      '.DS_Store',
+    ]);
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

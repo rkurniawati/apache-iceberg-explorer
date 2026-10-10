@@ -8,7 +8,12 @@
  * unhandled exceptions across the component boundary (design.md §2.5.2).
  */
 
-import type { ActiveConnectionHandle, MetadataVersionEntry, DirectoryContentsResult } from './types.js';
+import type {
+  ActiveConnectionHandle,
+  MetadataVersionEntry,
+  DirectoryContentsResult,
+  ListDirectoryOptions,
+} from './types.js';
 import type { StorageError } from './errors.js';
 
 export interface StorageAdapter {
@@ -63,12 +68,14 @@ export interface StorageAdapter {
 
   /**
    * List the immediate contents (subdirectories and files) at `dirPath`.
-   * Files ending in `.COMPLETE.gz` are excluded from the `files` array.
+   * By default, files are filtered to Iceberg data/delete files (.parquet, .orc, .avro).
+   * Pass `{ filter: 'all' }` in `options` to return unfiltered directory files.
    * Used for table root scanning and recursive data directory drilling.
    */
   listDirectoryContents(
     handle: ActiveConnectionHandle,
     dirPath: string,
+    options?: ListDirectoryOptions,
   ): Promise<DirectoryContentsResult | StorageError>;
 
   /**

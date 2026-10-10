@@ -16,7 +16,13 @@ import { promisify } from 'node:util';
 const gunzipAsync = promisify(zlib.gunzip);
 
 import type { StorageAdapter } from './StorageAdapter.js';
-import type { ActiveConnectionHandle, MetadataVersionEntry, DirectoryContentsResult } from './types.js';
+import type {
+  ActiveConnectionHandle,
+  MetadataVersionEntry,
+  DirectoryContentsResult,
+  ListDirectoryOptions,
+} from './types.js';
+import { isIcebergDataFile } from './types.js';
 import { mapNodeError, storageError, type StorageError } from './errors.js';
 import type { ILogger } from '../extension.js';
 
@@ -162,6 +168,7 @@ export class LocalFsAdapter implements StorageAdapter {
   async listDirectoryContents(
     handle: ActiveConnectionHandle,
     dirPath: string,
+    options?: ListDirectoryOptions,
   ): Promise<DirectoryContentsResult | StorageError> {
     const guard = this.pathGuard(handle.warehousePath, dirPath);
     if (guard) return guard;
@@ -169,6 +176,7 @@ export class LocalFsAdapter implements StorageAdapter {
     this.logger.info(`Listing directory: path=${dirPath} source=local`);
 
     const resolvedPath = path.resolve(dirPath);
+    const filterMode = options?.filter ?? 'iceberg-data';
 
     try {
       const entries = await fs.readdir(resolvedPath, { withFileTypes: true });
@@ -178,7 +186,7 @@ export class LocalFsAdapter implements StorageAdapter {
       for (const entry of entries) {
         if (entry.isDirectory()) {
           subdirectories.push(entry.name);
-        } else if (!entry.name.endsWith('.COMPLETE.gz')) {
+        } else if (filterMode === 'all' || isIcebergDataFile(entry.name)) {
           files.push(entry.name);
         }
       }

@@ -67,12 +67,35 @@ export interface MetadataVersionEntry {
 // Directory contents result returned by listDirectoryContents
 // ---------------------------------------------------------------------------
 
+/** Filter mode for listing directory files. */
+export type DirectoryFilterMode = 'iceberg-data' | 'all';
+
+/** Options for listDirectoryContents. */
+export interface ListDirectoryOptions {
+  /**
+   * Filter mode applied to files in the directory.
+   * - 'iceberg-data' (default): only returns Iceberg data/delete files (.parquet, .orc, .avro).
+   * - 'all': returns all immediate child files without extension filtering.
+   */
+  filter?: DirectoryFilterMode;
+}
+
+/** Standard file extensions for Apache Iceberg data and delete files. */
+export const ICEBERG_DATA_FILE_EXTENSIONS = ['.parquet', '.orc', '.avro'] as const;
+
+/** Checks whether a filename matches an Apache Iceberg data or delete file format (.parquet, .orc, .avro). */
+export function isIcebergDataFile(filename: string): boolean {
+  const lower = filename.toLowerCase();
+  return ICEBERG_DATA_FILE_EXTENSIONS.some((ext) => lower.endsWith(ext));
+}
+
 export interface DirectoryContentsResult {
   /** Immediate child sub-directory names (bare names, not full paths) */
   subdirectories: string[];
   /**
-   * Immediate child file names (bare names), filtered:
-   * files ending in `.COMPLETE.gz` are excluded.
+   * Immediate child file names (bare names), filtered according to ListDirectoryOptions.
+   * By default ('iceberg-data'), only Iceberg data/delete files (.parquet, .orc, .avro) are returned.
    */
   files: string[];
 }
+

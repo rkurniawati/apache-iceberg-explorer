@@ -364,7 +364,12 @@ void (async () => {
     const contents = await adapter.listDirectoryContents(handle, 'gs://iceberg-bucket/warehouse/db1/tableA');
     assert.ok(!('kind' in contents));
     assert.deepStrictEqual(contents.subdirectories, ['metadata', 'data']);
-    assert.deepStrictEqual(contents.files, ['data.parquet']); // skip.COMPLETE.gz excluded!
+    assert.deepStrictEqual(contents.files, ['data.parquet']); // skip.COMPLETE.gz excluded by default!
+
+    const allContents = await adapter.listDirectoryContents(handle, 'gs://iceberg-bucket/warehouse/db1/tableA', { filter: 'all' });
+    assert.ok(!('kind' in allContents));
+    assert.deepStrictEqual(allContents.subdirectories, ['metadata', 'data']);
+    assert.deepStrictEqual(allContents.files, ['data.parquet', 'skip.COMPLETE.gz']);
 
     // isTable
     const isTab = await adapter.isTable(handle, 'gs://iceberg-bucket/warehouse/db1/tableA');

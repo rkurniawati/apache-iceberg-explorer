@@ -22,7 +22,9 @@ import type {
   ActiveConnectionHandle,
   MetadataVersionEntry,
   DirectoryContentsResult,
+  ListDirectoryOptions,
 } from './types.js';
+import { isIcebergDataFile } from './types.js';
 import {
   mapGcsError,
   storageError,
@@ -220,6 +222,7 @@ export class GcsAdapter implements StorageAdapter {
   async listDirectoryContents(
     handle: ActiveConnectionHandle,
     dirPath: string,
+    options?: ListDirectoryOptions,
   ): Promise<DirectoryContentsResult | StorageError> {
     if (handle.connectionType !== 'gcs') {
       return storageError('internal', 'GcsAdapter requires a GCS connection handle.');
@@ -230,6 +233,7 @@ export class GcsAdapter implements StorageAdapter {
 
     const keyPath = gcsUriToKeyPrefix(dirPath);
     const prefix = normalisePrefix(keyPath);
+    const filterMode = options?.filter ?? 'iceberg-data';
 
     const subdirectories: string[] = [];
     const files: string[] = [];
@@ -261,7 +265,7 @@ export class GcsAdapter implements StorageAdapter {
           if (!key || key === prefix) continue; // skip directory marker
           const bareName = key.slice(prefix.length);
           if (!bareName) continue;
-          if (bareName.endsWith('.COMPLETE.gz')) continue;
+          if (filterMode === 'iceberg-data' && !isIcebergDataFile(bareName)) continue;
           files.push(bareName);
         }
 

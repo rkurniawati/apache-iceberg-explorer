@@ -24,7 +24,13 @@ import {
 } from '@aws-sdk/client-s3';
 
 import type { StorageAdapter } from './StorageAdapter.js';
-import type { ActiveConnectionHandle, MetadataVersionEntry, DirectoryContentsResult } from './types.js';
+import type {
+  ActiveConnectionHandle,
+  MetadataVersionEntry,
+  DirectoryContentsResult,
+  ListDirectoryOptions,
+} from './types.js';
+import { isIcebergDataFile } from './types.js';
 import { mapS3Error, storageError, isStorageError, type StorageError } from './errors.js';
 import type { ILogger } from '../extension.js';
 
@@ -209,6 +215,7 @@ export class S3Adapter implements StorageAdapter {
   async listDirectoryContents(
     handle: ActiveConnectionHandle,
     dirPath: string,
+    options?: ListDirectoryOptions,
   ): Promise<DirectoryContentsResult | StorageError> {
     if (handle.connectionType !== 's3') {
       return storageError('internal', 'S3Adapter requires an S3 connection handle.');
@@ -220,6 +227,7 @@ export class S3Adapter implements StorageAdapter {
     // Convert S3 URI to a raw key prefix, then normalise to end with '/'
     const keyPath = s3UriToKeyPrefix(dirPath);
     const prefix = normalisePrefix(keyPath);
+    const filterMode = options?.filter ?? 'iceberg-data';
 
     const subdirectories: string[] = [];
     const files: string[] = [];
@@ -251,7 +259,7 @@ export class S3Adapter implements StorageAdapter {
           if (!key || key === prefix) continue; // skip the directory marker
           const bareName = key.slice(prefix.length);
           if (!bareName) continue;
-          if (bareName.endsWith('.COMPLETE.gz')) continue;
+          if (filterMode === 'iceberg-data' && !isIcebergDataFile(bareName)) continue;
           files.push(bareName);
         }
 
