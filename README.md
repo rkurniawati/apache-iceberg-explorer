@@ -1,159 +1,83 @@
-# Iceberg Explorer — VS Code Extension
+# Iceberg Explorer for VS Code
 
-Browse Apache Iceberg warehouses stored in Google Cloud Storage (GCS), S3-compatible object storage, or on the local file system, directly from VS Code.
+Browse, inspect, and query **Apache Iceberg** warehouses directly from your VS Code workspace.
 
-> **MVP platform:** macOS arm64 only. The extension will not activate on other architectures.
-
----
-
-## Prerequisites
-
-- VS Code 1.96 or later
-- Node.js 20 or later
-- npm 10 or later
+Iceberg Explorer connects to local file systems, AWS S3 (and S3-compatible storage like MinIO), and Google Cloud Storage (GCS) to inspect metadata, visualize snapshots, analyze manifests, and run ad-hoc SQL queries using embedded DuckDB.
 
 ---
 
-## Install dependencies
+## Features
 
-From the `iceberg-explorer` directory:
+### 🌲 Interactive Sidebar Tree View
+* **Warehouse Hierarchy**: Seamlessly navigate namespaces, tables, metadata versions, snapshots, and manifest files from the VS Code Explorer sidebar.
+* **Multi-Connection Support**: Configure multiple warehouses and switch the active connection with one click.
 
-```bash
-npm install
-```
+### ☁️ Flexible Storage Backends
+* **Local File System**: Direct browsing of local Iceberg table directories.
+* **AWS S3 & S3-Compatible**: Connect to AWS S3 or custom endpoints (e.g., MinIO, Ceph, LocalStack).
+* **Google Cloud Storage (GCS)**: Authenticate with zero-config Application Default Credentials (ADC) via `gcloud` or dedicated Service Account JSON keys.
 
----
+### 📊 Deep Metadata & Schema Inspection
+* **Table Overview**: Inspect snapshot history, schema evolution, current partition specs, record counts, and storage metrics at a glance.
+* **Schema Viewer**: Browse columns, nested types, doc annotations, and nullability constraints.
+* **Metadata Structure**: Trace snapshot lineage, parent-child snapshot trees, and metadata JSON structure.
+* **Manifest & Avro Inspector**: Inspect manifest lists and manifest files with partition metrics and data file entries.
 
-## Run from the IDE (recommended during development)
+### ⚡ In-IDE SQL Querying (DuckDB-WASM)
+* **Ad-Hoc SQL Queries**: Run standard SQL queries against your Iceberg Parquet data files directly within VS Code—no external Spark or Trino clusters required.
+* **Instant Data Preview**: View query results and parquet data samples in interactive, paginated tables.
 
-This is the fastest way — no packaging required.
-
-**Step 1.** Open the `iceberg-explorer` folder as the VS Code workspace root:
-
-```bash
-code /path/to/delivery/projects/iceberg-explorer
-```
-
-> The folder must be the workspace root (not a parent folder). VS Code resolves
-> `${workspaceFolder}` in `.vscode/launch.json` to whatever folder is open.
-
-**Step 2.** Press **`F5`**.
-
-VS Code will:
-1. Compile the TypeScript source via `npm run compile`
-2. Open a new **Extension Development Host** window with the extension loaded
-
-You can also launch it from the sidebar: click the **Run and Debug** icon (`Cmd+Shift+D`), select **Run Extension** from the dropdown, then click the green play button.
-
-**What you will see** in the Extension Development Host window:
-
-- Open the Explorer sidebar (`Cmd+Shift+E`)
-- Scroll to the bottom — the **Iceberg Explorer** panel appears with a welcome view:
-  > *No Iceberg connections configured.*
-  > Includes an **Add Connection** button and a `+` icon in the view header.
-
-The settings webview and tree view are implemented in a later slice. The Connection Manager and Storage Layer backends are active and ready.
+### 🔒 Secure by Design
+* All sensitive credentials (AWS Access Keys, Session Tokens, GCS Service Account Keys) are stored exclusively in VS Code's Keychain-backed `SecretStorage`. Plain-text credentials are never saved to workspace files or settings.
 
 ---
 
-## Run from the command line (install as .vsix)
+## Quick Start
 
-Use this to install the extension permanently into your VS Code.
+### 1. Open the Explorer
+Click the **Explorer** icon (`Cmd+Shift+E`) in the VS Code Activity Bar and expand the **Iceberg Explorer** view at the bottom of the sidebar.
 
-**Step 1.** Install the VS Code Extension CLI tool:
+### 2. Add a Connection
+Click the **Add Connection** button (or the **`+`** icon in the view title) to open the Connection Settings panel:
+* **Local**: Provide the local absolute path to your warehouse directory.
+* **S3**: Enter your bucket name, optional prefix, region, credentials, and custom endpoint URL (if using MinIO/LocalStack).
+* **GCS**: Enter your bucket name, prefix, and select your authentication method (ADC or Service Account Key).
 
-```bash
-npm install -g @vscode/vsce
-```
-
-**Step 2.** Compile and package:
-
-```bash
-npm run compile
-vsce package --allow-missing-repository
-```
-
-This produces `iceberg-explorer-0.0.1.vsix` in the current directory.
-
-**Step 3.** Install:
-
-```bash
-code --install-extension iceberg-explorer-0.0.1.vsix
-```
-
-Or from inside VS Code: `Cmd+Shift+P` → **Extensions: Install from VSIX…** → select the `.vsix` file.
-
-**Step 4.** Reload VS Code:
-
-```bash
-# Command palette
-Cmd+Shift+P → Developer: Reload Window
-```
+### 3. Explore & Query
+* **Set Active**: Click **Activate** on your configured connection.
+* **Browse Tables**: Expand namespaces and tables in the sidebar to reveal schema, metadata, and snapshots.
+* **Inspect Details**: Right-click or click on any table to open the **Table Overview**, **Schema Overview**, or **Metadata Structure**.
+* **Query Data**: Open the **Ad-hoc Query** panel to run SQL queries against the underlying Parquet files.
 
 ---
 
-## Uninstall
+## Extension Commands
 
-```bash
-code --uninstall-extension TBD.iceberg-explorer
-```
-
-Or: `Cmd+Shift+P` → **Extensions: Show Installed Extensions** → find Iceberg Explorer → **Uninstall**.
-
----
-
-## Project structure
-
-```
-iceberg-explorer/
-├── .vscode/
-│   ├── launch.json        # F5 launch config (Extension Development Host)
-│   └── tasks.json         # Default build task (npm run compile)
-├── resources/
-│   └── iceberg.svg        # Sidebar icon
-├── src/
-│   ├── extension.ts       # Extension entry point (activate / deactivate)
-│   ├── connection/        # Connection Manager — saves configs, manages credentials
-│   │   ├── connectionManager.ts
-│   │   ├── types.ts
-│   │   ├── validation.ts
-│   │   └── index.ts
-│   └── storage/           # Storage Layer — S3, GCS, and local FS adapters
-│       ├── StorageAdapter.ts
-│       ├── localFsAdapter.ts
-│       ├── s3Adapter.ts
-│       ├── gcsAdapter.ts
-│       ├── errors.ts
-│       ├── types.ts
-│       └── index.ts
-├── out/                   # Compiled JavaScript (generated by npm run compile)
-├── package.json
-└── tsconfig.json
-```
-
----
-
-## Development scripts
+All commands can be triggered via the VS Code Command Palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 
 | Command | Description |
 |---|---|
-| `npm run compile` | One-shot TypeScript compile to `out/` |
-| `npm run watch` | Watch mode — recompiles on every save |
-| `npm run package` | Produce `.vsix` via `vsce package` |
+| `Iceberg Explorer: Add Connection` | Open connection manager to add a new warehouse |
+| `Iceberg Explorer: Open Connection Dashboard` | View and manage configured warehouse connections |
+| `Iceberg Explorer: Open Table Overview` | Display table summary, properties, and metrics |
+| `Iceberg Explorer: Open Schema Overview` | View column definitions, types, and schemas |
+| `Iceberg Explorer: Open Metadata Structure` | Inspect snapshot DAG, manifest hierarchy, and metadata JSON |
 
 ---
 
-## Features & Scope
+## System Requirements
 
-- Save and activate S3, Google Cloud Storage (GCS), and local FS connections
-- Native GCS authentication: Application Default Credentials (ADC) / `gcloud` (zero config) and Service Account Key
-- Credentials stored exclusively in VS Code `SecretStorage` (Keychain-backed)
-- Non-secret config persisted in `globalState` with an LRU cap
-- Common `StorageAdapter` interface over `LocalFsAdapter`, `S3Adapter`, and `GcsAdapter`
+* **VS Code**: Version `1.96.0` or later
+* **Platform**: macOS arm64 (Apple Silicon) *(MVP architecture)*
 
-The following are **not yet implemented** (deferred to later slices):
+---
 
-- Tree View Provider (schema / table / metadata / snapshot hierarchy)
-- Connection Settings Webview
-- Metadata Detail, Manifest, and Parquet Preview panels
-- Ad-hoc DuckDB SQL query panel
+## Development & Contributing
+
+Looking to build from source, run tests, or contribute to the extension? See [CONTRIBUTING.md](CONTRIBUTING.md) for prerequisites, build scripts, and architecture details.
+
+---
+
+## License
+
+Refer to the project repository for license details.

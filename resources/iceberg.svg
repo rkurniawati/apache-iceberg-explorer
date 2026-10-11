@@ -1,6 +1,59 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
-  <!-- tip above waterline -->
-  <polygon points="8,1 13,8 3,8" fill="currentColor" opacity="0.6"/>
-  <!-- bulk below waterline -->
-  <polygon points="8,6 15,15 1,15" fill="currentColor"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="100%" height="100%">
+  <defs>
+    <clipPath id="circle-frame">
+      <circle cx="250" cy="250" r="220" />
+    </clipPath>
+  </defs>
+
+  <g clip-path="url(#circle-frame)">
+    <!-- Sky background -->
+    <rect x="0" y="0" width="500" height="500" fill="#a4d4f4" />
+
+    <!-- Ocean background (waterline at y=130) -->
+    <rect x="0" y="130" width="500" height="370" fill="#1b6cb4" />
+
+    <!-- Iceberg Facets -->
+    <g stroke-linejoin="round" stroke-linecap="round">
+      <!-- Above Water: Top flat facet -->
+      <polygon points="172,112 338,112 374,130 144,130" fill="#f4fbfe" />
+
+      <!-- Above Water: Front-left facet -->
+      <polygon points="144,130 172,112 253,112 253,130" fill="#e1f3fd" />
+
+      <!-- Above Water: Front-right facet -->
+      <polygon points="253,112 338,112 374,130 253,130" fill="#c4e5f8" />
+
+      <!-- Below Water: Central ridge & left side -->
+      <!-- Facet 1: Upper-left edge facet -->
+      <polygon points="144,130 253,130 102,176" fill="#89c8ee" />
+
+      <!-- Facet 2: Upper center-left -->
+      <polygon points="253,130 253,240 102,176" fill="#75bde7" />
+
+      <!-- Facet 3: Mid-left flank -->
+      <polygon points="102,176 253,240 178,298" fill="#80c3eb" />
+
+      <!-- Facet 4: Lower-mid left -->
+      <polygon points="178,298 253,240 253,356 186,348" fill="#5fafe0" />
+
+      <!-- Facet 5: Bottom-left tip -->
+      <polygon points="186,348 253,356 253,420 186,348" fill="#7ac0e9" />
+
+      <!-- Below Water: Central ridge & right side -->
+      <!-- Facet 6: Upper center-right -->
+      <polygon points="253,130 331,130 331,208 253,240" fill="#58aae0" />
+
+      <!-- Facet 7: Upper right edge -->
+      <polygon points="331,130 374,130 395,176 331,208" fill="#4b92cf" />
+
+      <!-- Facet 8: Mid-right upper facet -->
+      <polygon points="331,208 395,176 339,235 253,240" fill="#3874b7" />
+
+      <!-- Facet 9: Mid-right deep shadow block -->
+      <polygon points="253,240 339,235 339,305 253,356" fill="#467bc0" />
+
+      <!-- Facet 10: Bottom-right facet to tip -->
+      <polygon points="253,356 339,305 253,420" fill="#3c82c6" />
+    </g>
+  </g>
 </svg>

@@ -2,8 +2,13 @@
   "name": "iceberg-explorer",
   "displayName": "Iceberg Explorer",
   "description": "Browse Apache Iceberg warehouses in Google Cloud Storage, S3-compatible storage, or local file system from VS Code.",
+  "icon": "resources/iceberg.png",
   "version": "0.0.1",
   "publisher": "TBD",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/rkurniawati/apache-iceberg-explorer.git"
+  },
   "engines": {
     "vscode": "^1.96.0"
   },
@@ -120,7 +125,8 @@
     "test:slice-new-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts",
     "test:slice-gcs": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-gcs.test.ts",
     "test:slice-view": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-iceberg-view.test.ts",
-    "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package",
+    "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package --skip-license",
+    "generate-icon": "inkscape resources/iceberg.svg -w 256 -h 256 -o resources/iceberg.png",
     "postcompile": "npm run copy-wasm"
   },
   "dependencies": {
