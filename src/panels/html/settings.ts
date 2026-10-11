@@ -147,9 +147,12 @@ export function getSettingsHtml(
       padding: 0.5rem 0.75rem;
       border-radius: 3px;
       margin-bottom: 0.75rem;
+      align-items: center;
+      justify-content: space-between;
+      gap: 0.75rem;
     }
     #status-banner.success {
-      display: block;
+      display: flex;
       background: var(--vscode-notificationsInfoBackground, var(--vscode-badge-background));
       color: var(--vscode-notificationsInfoForeground, var(--vscode-badge-foreground));
       border: 1px solid var(--vscode-editorWidget-border);
@@ -159,13 +162,21 @@ export function getSettingsHtml(
       color: var(--vscode-errorForeground);
       border: 1px solid var(--vscode-errorForeground);
     }
+    #banner-connect-btn {
+      font-size: 0.85em;
+      padding: 0.25rem 0.65rem;
+      white-space: nowrap;
+    }
   </style>
 </head>
 <body>
 
 <h1>Iceberg Explorer — Connection Settings</h1>
 
-<div id="status-banner"></div>
+<div id="status-banner">
+  <span id="status-banner-text"></span>
+  <button class="primary" id="banner-connect-btn" type="button" style="display: none;">Connect</button>
+</div>
 
 <section id="form-section">
   <h2 id="form-heading">New Connection</h2>
@@ -281,7 +292,7 @@ export function getSettingsHtml(
   </div>
 
   <div class="btn-row">
-    <button class="primary" id="save-btn" type="button">Save &amp; Connect</button>
+    <button class="primary" id="save-btn" type="button">Save Connection</button>
     <button class="secondary" id="clear-btn" type="button">Clear</button>
   </div>
 </section>
@@ -323,9 +334,11 @@ export function getSettingsHtml(
   const connId         = /** @type {HTMLInputElement}    */ (document.getElementById('conn-id'));
   const formHeading    = document.getElementById('form-heading');
   const credsNote      = document.getElementById('creds-note');
-  const saveBtn        = document.getElementById('save-btn');
-  const clearBtn       = document.getElementById('clear-btn');
-  const statusBanner   = document.getElementById('status-banner');
+  const saveBtn          = document.getElementById('save-btn');
+  const clearBtn         = document.getElementById('clear-btn');
+  const statusBanner     = document.getElementById('status-banner');
+  const statusBannerText = document.getElementById('status-banner-text');
+  const bannerConnectBtn = /** @type {HTMLButtonElement} */ (document.getElementById('banner-connect-btn'));
 
   var gcsKeyMode = 'file'; // 'file' | 'paste'
 
@@ -527,17 +540,54 @@ export function getSettingsHtml(
       el.classList.remove('visible');
     });
   }
-  function showBanner(msg, isError) {
-    statusBanner.textContent = msg;
-    statusBanner.className   = isError ? 'error' : 'success';
-    statusBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  function showBanner(msg, isError, connectId) {
+    if (statusBannerText) {
+      statusBannerText.textContent = msg;
+    } else if (statusBanner) {
+      statusBanner.textContent = msg;
+    }
+    if (statusBanner) {
+      statusBanner.className = isError ? 'error' : 'success';
+    }
+    if (bannerConnectBtn) {
+      if (!isError && connectId) {
+        bannerConnectBtn.dataset.connId = connectId;
+        bannerConnectBtn.style.display = 'inline-block';
+        bannerConnectBtn.disabled = false;
+        bannerConnectBtn.textContent = 'Connect';
+      } else {
+        bannerConnectBtn.style.display = 'none';
+        delete bannerConnectBtn.dataset.connId;
+      }
+    }
+    if (statusBanner) {
+      statusBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
   }
   function hideBanner() {
-    statusBanner.className = '';
-    statusBanner.textContent = '';
+    if (statusBanner) statusBanner.className = '';
+    if (statusBannerText) statusBannerText.textContent = '';
+    if (bannerConnectBtn) {
+      bannerConnectBtn.style.display = 'none';
+      delete bannerConnectBtn.dataset.connId;
+    }
   }
 
-  // ── Save & Connect ────────────────────────────────────────────────────────
+  if (bannerConnectBtn) {
+    bannerConnectBtn.addEventListener('click', function () {
+      var idToConnect = bannerConnectBtn.dataset.connId;
+      if (idToConnect) {
+        bannerConnectBtn.disabled = true;
+        bannerConnectBtn.textContent = 'Connecting...';
+        vscode.postMessage({
+          type: 'activateConnection',
+          id: idToConnect,
+        });
+      }
+    });
+  }
+
+  // ── Save Connection ────────────────────────────────────────────────────────
   saveBtn.addEventListener('click', function () {
     clearErrors();
     hideBanner();
@@ -742,7 +792,7 @@ export function getSettingsHtml(
         }
         break;
       case 'saveSuccess':
-        showBanner('Connection saved and activated.', false);
+        showBanner('Connection saved.', false, msg.connectionId);
         if (Array.isArray(msg.connections)) {
           existingConnections = msg.connections;
         }
@@ -790,9 +840,17 @@ export function getSettingsHtml(
         }
         break;
       case 'activateSuccess':
+        if (bannerConnectBtn) {
+          bannerConnectBtn.disabled = false;
+          bannerConnectBtn.textContent = 'Connect';
+        }
         showBanner('Connection activated.', false);
         break;
       case 'activateError':
+        if (bannerConnectBtn) {
+          bannerConnectBtn.disabled = false;
+          bannerConnectBtn.textContent = 'Connect';
+        }
         showBanner(msg.message || 'Could not activate connection.', true);
         break;
       case 'deleteSuccess':

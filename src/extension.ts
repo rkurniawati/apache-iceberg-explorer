@@ -129,6 +129,7 @@ export function activate(context: vscode.ExtensionContext): void {
           if (result instanceof Error) { throw result; }
           // Keep the tree in sync after save
           treeProvider.setConnections(connectionManager.listConnections());
+          return result;
         },
         // activateConnection returns ActiveConnectionHandle | Error; the panel
         // callback signature expects ActiveConnectionHandle | StorageError —
@@ -142,6 +143,25 @@ export function activate(context: vscode.ExtensionContext): void {
           const adapter = getAdapterForType(result.connectionType);
           treeProvider.setActiveConnectionId(id);
           treeProvider.setActiveConnection(result, adapter);
+
+          // Select and expand the corresponding node in the tree view
+          try {
+            const item = treeProvider.findItemByPath(id);
+            if (item) {
+              await treeView.reveal(item, { select: true, focus: false, expand: true });
+            }
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            logger.warn(`Tree reveal failed on activate: ${msg}`);
+          }
+
+          // Open the overview webview (Connection Dashboard)
+          const configs = connectionManager.listConnections();
+          const config = configs.find((c) => c.id === id);
+          if (config) {
+            void panelManager.openConnectionDashboardPanel(config, result, adapter);
+          }
+
           return result;
         },
         (id) => {

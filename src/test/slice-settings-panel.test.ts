@@ -771,6 +771,46 @@ void (async () => {
     }
   });
 
+  await run('Settings panel client script executes without runtime errors during initialization', async () => {
+    const { getSettingsHtml } = await import('../panels/html/settings.js');
+    const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
+    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+
+    const mockElement = (id = '') => ({
+      id,
+      value: '',
+      textContent: '',
+      style: {},
+      classList: { add() {}, remove() {} },
+      addEventListener() {},
+      querySelectorAll() { return []; },
+      scrollIntoView() {},
+      dataset: {},
+      disabled: false,
+    });
+
+    const elements: Record<string, any> = {};
+    const mockDocument = {
+      getElementById(id: string) {
+        if (!elements[id]) {
+          elements[id] = mockElement(id);
+        }
+        return elements[id];
+      },
+      querySelectorAll() { return []; },
+    };
+    const mockWindow = {
+      addEventListener() {},
+    };
+
+    for (const match of scriptMatches) {
+      assert.doesNotThrow(() => {
+        const fn = new Function('acquireVsCodeApi', 'document', 'window', match[1]);
+        fn(() => ({ postMessage() {} }), mockDocument, mockWindow);
+      }, 'Settings webview script must not throw runtime errors on initialization');
+    }
+  });
+
   // ── Warehouse structure validation ──────────────────────────────────────────
   function makeMockAdapterForDogs() {
     return {
@@ -998,6 +1038,35 @@ void (async () => {
       const editMsg = msgs.find((m) => m.type === 'editConnection');
       assert.ok(editMsg, `expected editConnection in messages: ${JSON.stringify(msgs)}`);
       assert.strictEqual(editMsg!.hasSavedCredentials, true);
+    });
+  });
+
+  await run('Settings HTML includes "Save Connection" button and banner connect button', async () => {
+    const { getSettingsHtml } = await import('../panels/html/settings.js');
+    const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
+    assert.ok(html.includes('id="save-btn"'), 'HTML must contain save-btn');
+    assert.ok(html.includes('Save Connection'), 'HTML must have "Save Connection" text');
+    assert.ok(html.includes('id="banner-connect-btn"'), 'HTML must contain banner-connect-btn');
+    assert.ok(html.includes('id="status-banner-text"'), 'HTML must contain status-banner-text');
+  });
+
+  await run('saveSuccess message includes connectionId for newly saved connection', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(undefined, async () => 'conn-saved-123', noopActivateConnection, noopDeleteConnection);
+
+      await fireMessage({
+        type: 'saveConnection',
+        connectionType: 'local',
+        label: 'New Conn',
+        warehousePath: '/data/warehouse',
+        sslVerification: true,
+      });
+
+      const msgs = getMessages();
+      const saveSuccess = msgs.find((m) => m.type === 'saveSuccess');
+      assert.ok(saveSuccess, 'saveSuccess message was posted');
+      assert.strictEqual(saveSuccess!.connectionId, 'conn-saved-123');
     });
   });
 

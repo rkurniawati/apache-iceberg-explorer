@@ -1151,7 +1151,7 @@ export class WebviewPanelManager {
    */
   async openSettingsPanel(
     editConfig:         ConnectionConfig | undefined,
-    saveConnection:     (config: ConnectionConfig, creds: { accessKey: string; secretKey: string }) => Promise<void>,
+    saveConnection:     (config: ConnectionConfig, creds: { accessKey: string; secretKey: string }) => Promise<string | void>,
     activateConnection: (id: string) => Promise<ActiveConnectionHandle | StorageError>,
     deleteConnection:   (id: string) => Promise<void>,
     getExistingConfigs?: () => ConnectionConfig[],
@@ -1248,9 +1248,14 @@ export class WebviewPanelManager {
               secretKey: String(msg.secretKey ?? '').trim(),
             };
             try {
-              await saveConnection(config, creds);
+              const savedId = await saveConnection(config, creds);
+              const effectiveId = (typeof savedId === 'string' && savedId) ? savedId : config.id;
               const currentConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : undefined;
-              void panel.webview.postMessage({ type: 'saveSuccess', connections: currentConns });
+              void panel.webview.postMessage({
+                type: 'saveSuccess',
+                connections: currentConns,
+                connectionId: effectiveId,
+              });
             } catch (err: unknown) {
               const message = isStorageError(err)
                 ? err.message
