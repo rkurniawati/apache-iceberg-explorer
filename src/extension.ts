@@ -189,7 +189,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
   
-  // Register tree-related commands (openMetadataPanel, retryTreeNode, activateConnection, editConnection, deleteConnection)
+  // Register tree-related commands (openMetadataPanel, retryTreeNode, connectConnection, disconnectConnection, editConnection, deleteConnection)
   registerTreeCommands(
     context,
     treeProvider,

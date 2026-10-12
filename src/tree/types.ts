@@ -260,7 +260,7 @@ export function makeConnectionItem(config: ConnectionConfig, isActive: boolean):
   );
   item.description = `${config.connectionType.toUpperCase()} \u2014 ${config.warehousePath}`;
   item.tooltip = config.warehousePath;
-  item.contextValue = 'icebergConnection';
+  item.contextValue = isActive ? 'icebergConnectionConnected' : 'icebergConnectionDisconnected';
   item.iconPath = isActive
     ? new vscode.ThemeIcon('database', new vscode.ThemeColor('charts.green'))
     : new vscode.ThemeIcon('database');
@@ -270,8 +270,8 @@ export function makeConnectionItem(config: ConnectionConfig, isActive: boolean):
     ? vscode.TreeItemCollapsibleState.Expanded
     : vscode.TreeItemCollapsibleState.None;
   item.command = {
-    command: 'icebergExplorer.activateConnection',
-    title: 'Activate',
+    command: 'icebergExplorer.connectConnection',
+    title: 'Connect',
     arguments: [config.id],
   };
   return item;

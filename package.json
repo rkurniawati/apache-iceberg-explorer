@@ -42,8 +42,13 @@
         "title": "Iceberg Explorer: Open Test Metadata Panel"
       },
       {
-        "command": "icebergExplorer.activateConnection",
-        "title": "Activate Connection",
+        "command": "icebergExplorer.connectConnection",
+        "title": "Connect",
+        "category": "Iceberg Explorer"
+      },
+      {
+        "command": "icebergExplorer.disconnectConnection",
+        "title": "Disconnect",
         "category": "Iceberg Explorer"
       },
       {
@@ -87,14 +92,24 @@
       ],
       "view/item/context": [
         {
-          "command": "icebergExplorer.editConnection",
-          "when": "view == icebergExplorer && viewItem == icebergConnection",
+          "command": "icebergExplorer.connectConnection",
+          "when": "view == icebergExplorer && (viewItem == icebergConnection || viewItem == icebergConnectionDisconnected)",
           "group": "icebergConnection@1"
         },
         {
-          "command": "icebergExplorer.deleteConnection",
-          "when": "view == icebergExplorer && viewItem == icebergConnection",
+          "command": "icebergExplorer.disconnectConnection",
+          "when": "view == icebergExplorer && viewItem == icebergConnectionConnected",
+          "group": "icebergConnection@1"
+        },
+        {
+          "command": "icebergExplorer.editConnection",
+          "when": "view == icebergExplorer && (viewItem == icebergConnection || viewItem == icebergConnectionConnected || viewItem == icebergConnectionDisconnected)",
           "group": "icebergConnection@2"
+        },
+        {
+          "command": "icebergExplorer.deleteConnection",
+          "when": "view == icebergExplorer && (viewItem == icebergConnection || viewItem == icebergConnectionConnected || viewItem == icebergConnectionDisconnected)",
+          "group": "icebergConnection@3"
         }
       ]
     },

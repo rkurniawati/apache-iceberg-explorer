@@ -9,6 +9,7 @@
  */
 
 import * as assert from 'node:assert';
+import * as vscode from 'vscode';
 
 import type { StorageAdapter } from '../storage/StorageAdapter';
 import { S3Adapter } from '../storage/s3Adapter';
@@ -218,10 +219,12 @@ void (async () => {
   });
 
   // ── New Test: Context value on connection node ────────────────────────────
-  await run('Connection node has contextValue === "icebergConnection"', async () => {
+  await run('Connection node has contextValue for connected and disconnected states', async () => {
     const { makeConnectionItem } = await import('../tree/types.js');
-    const connItem = makeConnectionItem(conn1, false);
-    assert.strictEqual((connItem as any).contextValue, 'icebergConnection');
+    const disconnectedItem = makeConnectionItem(conn1, false);
+    assert.strictEqual((disconnectedItem as any).contextValue, 'icebergConnectionDisconnected');
+    const connectedItem = makeConnectionItem(conn1, true);
+    assert.strictEqual((connectedItem as any).contextValue, 'icebergConnectionConnected');
   });
 
   // ── New Test: Activate command marks connection as active ─────────────────
@@ -236,7 +239,10 @@ void (async () => {
     // but we can verify the command argument still carries the id correctly
     const firstCmd = (items[0] as any).command;
     assert.ok(firstCmd, 'connection node must have a command');
-    assert.strictEqual(firstCmd.command, 'icebergExplorer.activateConnection');
+    assert.ok(
+      firstCmd.command === 'icebergExplorer.connectConnection' || firstCmd.command === 'icebergExplorer.activateConnection',
+      `expected connect command, got ${firstCmd.command}`,
+    );
     assert.deepStrictEqual(firstCmd.arguments, ['conn-1']);
   });
 
@@ -1082,6 +1088,81 @@ void (async () => {
       '_SUCCESS',
       '.DS_Store',
     ]);
+  });
+
+  // ── Test 29: connectConnection and disconnectConnection commands ──────────
+  await run('connectConnection and disconnectConnection commands update tree state with string id or tree item', async () => {
+    const { registerTreeCommands } = await import('../tree/commands.js');
+    const { makeConnectionItem } = await import('../tree/types.js');
+    const provider = makeProvider();
+    provider.setConnections([conn1, conn2]);
+
+    let activatedId: string | undefined;
+    let openedDashboardId: string | undefined;
+
+    const mockActivate = async (id: string) => {
+      activatedId = id;
+      return { handle: fakeHandle, adapter: makeAdapter() };
+    };
+
+    const mockPanelManager: any = {
+      openConnectionDashboardPanel: (config: any) => {
+        openedDashboardId = config.id;
+      },
+    };
+
+    const mockContext: any = {
+      subscriptions: [],
+    };
+
+    registerTreeCommands(
+      mockContext,
+      provider,
+      mockPanelManager,
+      testLogger,
+      mockActivate,
+      noopDelete,
+      () => [conn1, conn2],
+    );
+
+    // 1. Invoke connectConnection with string ID
+    const registered = (vscode.commands as any)._getRegistered();
+    const connectCmd = registered.get('icebergExplorer.connectConnection');
+    assert.ok(connectCmd, 'icebergExplorer.connectConnection must be registered');
+
+    await connectCmd('conn-1');
+    assert.strictEqual(activatedId, 'conn-1');
+    assert.strictEqual(provider.getActiveConnectionId(), 'conn-1');
+    assert.strictEqual(provider.getActiveHandle(), fakeHandle);
+    assert.strictEqual(openedDashboardId, 'conn-1');
+
+    // 2. Disconnect with active tree item (as from context menu)
+    const disconnectCmd = registered.get('icebergExplorer.disconnectConnection');
+    assert.ok(disconnectCmd, 'icebergExplorer.disconnectConnection must be registered');
+
+    const activeItem = makeConnectionItem(conn1, true);
+    await disconnectCmd(activeItem);
+    assert.strictEqual(provider.getActiveConnectionId(), null);
+    assert.strictEqual(provider.getActiveHandle(), null);
+
+    // 3. Invoke connectConnection with TreeItem (as VS Code does from context menu)
+    const disconnectedItem2 = makeConnectionItem(conn2, false);
+    await connectCmd(disconnectedItem2);
+    assert.strictEqual(activatedId, 'conn-2');
+    assert.strictEqual(provider.getActiveConnectionId(), 'conn-2');
+    assert.strictEqual(openedDashboardId, 'conn-2');
+
+    // 4. Disconnect with no arguments (as from Command Palette)
+    await disconnectCmd();
+    assert.strictEqual(provider.getActiveConnectionId(), null);
+    assert.strictEqual(provider.getActiveHandle(), null);
+
+    // 5. Disconnect with non-active item should NOT disconnect active connection
+    await connectCmd('conn-1');
+    assert.strictEqual(provider.getActiveConnectionId(), 'conn-1');
+    const otherItem = makeConnectionItem(conn2, false);
+    await disconnectCmd(otherItem);
+    assert.strictEqual(provider.getActiveConnectionId(), 'conn-1', 'other connection item must not disconnect active connection');
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

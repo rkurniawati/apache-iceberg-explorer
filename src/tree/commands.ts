@@ -2,11 +2,13 @@
  * Tree View command registrations (architecture.md §4, design.md §2.7).
  *
  * Registers:
- *  - icebergExplorer.openMetadataPanel   — opens the metadata detail panel
- *  - icebergExplorer.retryTreeNode       — clears cache and re-fetches children
- *  - icebergExplorer.activateConnection  — activates a saved connection
- *  - icebergExplorer.editConnection      — opens settings pre-populated for editing
- *  - icebergExplorer.deleteConnection    — deletes a saved connection
+ *  - icebergExplorer.openMetadataPanel    — opens the metadata detail panel
+ *  - icebergExplorer.retryTreeNode        — clears cache and re-fetches children
+ *  - icebergExplorer.connectConnection    — connects to a saved connection
+ *  - icebergExplorer.disconnectConnection  — disconnects the active connection
+ *  - icebergExplorer.activateConnection   — (alias) activates a saved connection
+ *  - icebergExplorer.editConnection       — opens settings pre-populated for editing
+ *  - icebergExplorer.deleteConnection     — deletes a saved connection
  *
  * Component boundary rule: commands delegate to the appropriate component;
  * this module never creates WebviewPanel instances directly.
@@ -191,29 +193,85 @@ export function registerTreeCommands(
     ),
   );
 
-  // ── icebergExplorer.activateConnection ──────────────────────────────────
-  // Arguments: [id: string]
+  // ── icebergExplorer.connectConnection ────────────────────────────────────
+  // Arguments: [id: string] or [item: IcebergTreeItem] or undefined
+  const connectConnectionHandler = async (idOrItem?: string | IcebergTreeItem) => {
+    let id = typeof idOrItem === 'string' ? idOrItem : idOrItem?.resourcePath;
+    if (!id) {
+      const configs = listConnections();
+      if (configs.length === 0) {
+        void vscode.window.showInformationMessage('No saved connections found.');
+        return;
+      }
+      if (configs.length === 1) {
+        id = configs[0].id;
+      } else {
+        const picked = await vscode.window.showQuickPick(
+          configs.map((c) => ({ label: c.label, description: c.warehousePath, id: c.id })),
+          { placeHolder: 'Select a connection to connect' },
+        );
+        if (!picked) { return; }
+        id = picked.id;
+      }
+    }
+    logger.info(`connectConnection command: id=${id}`);
+    const result = await activateConnection(id);
+    if (result instanceof Error) {
+      void vscode.window.showErrorMessage(
+        `Failed to connect: ${result.message}`,
+      );
+      return;
+    }
+    provider.setActiveConnectionId(id);
+    provider.setActiveConnection(result.handle, result.adapter);
+
+    const configs = listConnections();
+    const config = configs.find(c => c.id === id);
+    if (config) {
+      void panelManager.openConnectionDashboardPanel(config, result.handle, result.adapter);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.connectConnection',
+      connectConnectionHandler,
+    ),
+  );
+
   context.subscriptions.push(
     vscode.commands.registerCommand(
       'icebergExplorer.activateConnection',
-      async (id: string) => {
-        logger.info('activateConnection command');
-        const result = await activateConnection(id);
-        if (result instanceof Error) {
-          void vscode.window.showErrorMessage(
-            `Failed to activate connection: ${result.message}`,
-          );
-          return;
-        }
-        provider.setActiveConnectionId(id);
-        provider.setActiveConnection(result.handle, result.adapter);
+      connectConnectionHandler,
+    ),
+  );
 
-        const configs = listConnections();
-        const config = configs.find(c => c.id === id);
-        if (config) {
-          void panelManager.openConnectionDashboardPanel(config, result.handle, result.adapter);
-        }
-      },
+  // ── icebergExplorer.disconnectConnection ─────────────────────────────────
+  // Arguments: [id: string] or [item: IcebergTreeItem] or undefined
+  const disconnectConnectionHandler = async (idOrItem?: string | IcebergTreeItem) => {
+    logger.info('disconnectConnection command');
+    const id = typeof idOrItem === 'string' ? idOrItem : idOrItem?.resourcePath;
+    const activeId = provider.getActiveConnectionId();
+    if (!activeId) {
+      return;
+    }
+    if (!id || id === activeId) {
+      provider.setActiveConnectionId(null);
+      provider.setActiveConnection(null);
+    }
+  };
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.disconnectConnection',
+      disconnectConnectionHandler,
+    ),
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand(
+      'icebergExplorer.deactivateConnection',
+      disconnectConnectionHandler,
     ),
   );
 
