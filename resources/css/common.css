@@ -1,0 +1,189 @@
+/**
+ * Common styles for Iceberg Explorer webview panels.
+ * All colours use VS Code theme variables (--vscode-*).
+ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--vscode-font-family, sans-serif);
+  font-size: var(--vscode-font-size, 13px);
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  margin: 0;
+  padding: 0 1.25rem 2.5rem;
+}
+
+/* ── Breadcrumb Bar (NFR-9) ─────────────────────────────────────────────────── */
+#breadcrumb {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  margin-bottom: 0.75rem;
+  font-size: 0.9em;
+}
+
+.breadcrumb-sep {
+  opacity: 0.5;
+}
+
+.breadcrumb-link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+}
+
+.breadcrumb-link:hover {
+  opacity: 0.8;
+}
+
+.breadcrumb-current {
+  font-weight: 600;
+}
+
+/* ── Common Table Layout (NFR-9) ────────────────────────────────────────────── */
+#table-wrapper {
+  display: none;
+  overflow-x: auto;
+  margin-top: 0.5rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: var(--vscode-font-size, 13px);
+}
+
+th {
+  text-align: left;
+  padding: 0.4rem 0.6rem;
+  border-bottom: 2px solid var(--vscode-editorWidget-border);
+  color: var(--vscode-descriptionForeground);
+  font-weight: 600;
+}
+
+td {
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+tr:hover td {
+  background: var(--vscode-list-hoverBackground);
+}
+
+/* ── Standard Buttons ───────────────────────────────────────────────────────── */
+button.btn {
+  background: var(--vscode-button-background);
+  color: var(--vscode-button-foreground);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 0.35rem 0.7rem;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+button.btn:hover {
+  background: var(--vscode-button-hoverBackground);
+}
+
+button.btn-secondary {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #fff);
+}
+
+button.btn-secondary:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+button.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.action-link {
+  background: var(--vscode-button-secondaryBackground, #3a3d41);
+  color: var(--vscode-button-secondaryForeground, #fff);
+  border: 1px solid var(--vscode-button-border, transparent);
+  padding: 0.2rem 0.55rem;
+  border-radius: 2px;
+  cursor: pointer;
+  font-size: 0.78rem;
+}
+
+.action-link:hover {
+  background: var(--vscode-button-secondaryHoverBackground, #45494e);
+}
+
+/* ── Badges ─────────────────────────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+}
+
+.active-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.3);
+}
+
+/* ── Loading Indicator & Spinner ────────────────────────────────────────────── */
+#loading {
+  padding: 3rem 1rem;
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+}
+
+.spinner {
+  display: inline-block;
+  width: 28px;
+  height: 28px;
+  border: 3px solid var(--vscode-editorWidget-border);
+  border-top-color: var(--vscode-textLink-foreground);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  margin-bottom: 0.75rem;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Error Banner ───────────────────────────────────────────────────────────── */
+#error {
+  display: none;
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--vscode-inputValidation-errorBorder, #f14c4c);
+  background: var(--vscode-inputValidation-errorBackground, rgba(241, 76, 76, 0.1));
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-editor-foreground));
+  border-radius: 3px;
+}
+
+/* ── Utilities ──────────────────────────────────────────────────────────────── */
+.hidden {
+  display: none !important;
+}

@@ -1932,12 +1932,25 @@ export class WebviewPanelManager {
       PanelType.MetadataStructure,
       `${title} — Metadata Structure`,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'metadataStructure');
     const nonce = generateNonce();
-    panel.webview.html = getMetadataStructureHtml(nonce, panel.webview.cspSource, cleanTablePath);
+    const commonCssUri = panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'css', 'common.css'),
+    );
+    const panelCssUri = panel.webview.asWebviewUri(
+      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'css', 'metadataStructure.css'),
+    );
+    panel.webview.html = getMetadataStructureHtml(nonce, panel.webview.cspSource, cleanTablePath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     const record: PanelRecord = { panel, resourcePath: cleanTablePath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);

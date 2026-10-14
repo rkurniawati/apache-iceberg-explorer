@@ -1,0 +1,307 @@
+/**
+ * Metadata Structure Panel Styles.
+ * All colours use VS Code theme variables (--vscode-*).
+ */
+
+.header-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  flex-wrap: wrap;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.4rem;
+  font-weight: 600;
+}
+
+/* ── Timeline Rail ──────────────────────────────────────────────────────────── */
+.section-title {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.timeline-container {
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.timeline-scroll {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 0.5rem 0;
+}
+
+.snap-chip {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 0.6rem 0.85rem;
+  min-width: 280px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  transition: border-color 0.15s ease;
+}
+
+.snap-chip:hover {
+  border-color: var(--vscode-focusBorder);
+}
+
+.snap-chip.selected {
+  border-color: var(--vscode-textLink-foreground);
+  box-shadow: 0 0 0 1px var(--vscode-textLink-foreground);
+}
+
+.snap-chip-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  white-space: nowrap;
+}
+
+.snap-chip-id {
+  font-family: monospace;
+  font-weight: 600;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
+.snap-chip-time {
+  font-size: 0.75rem;
+  color: var(--vscode-descriptionForeground);
+  white-space: nowrap;
+}
+
+.op-badge {
+  display: inline-block;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  white-space: nowrap;
+  flex-shrink: 0;
+  line-height: 1.2;
+}
+
+.op-append {
+  background: #065f46;
+  color: #34d399;
+}
+
+.op-overwrite {
+  background: #9a3412;
+  color: #fdba74;
+}
+
+.op-replace {
+  background: #3730a3;
+  color: #a5b4fc;
+}
+
+.op-delete {
+  background: #991b1b;
+  color: #f87171;
+}
+
+.pagination-controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--vscode-editorWidget-border);
+}
+
+/* ── DAG Tree Architecture Layout ──────────────────────────────────────────── */
+.dag-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1.5rem 1rem;
+  background: var(--vscode-editorWidget-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 6px;
+}
+
+.dag-node {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 0.75rem 1.25rem;
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+  position: relative;
+}
+
+.dag-node-meta {
+  border-color: #3b82f6;
+  box-shadow: 0 0 4px rgba(59, 130, 246, 0.2);
+}
+
+.dag-node-snap {
+  border-color: #10b981;
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.2);
+}
+
+.dag-node-ml {
+  border-color: #8b5cf6;
+  box-shadow: 0 0 4px rgba(139, 92, 246, 0.2);
+}
+
+.dag-arrow {
+  font-size: 1.4rem;
+  color: var(--vscode-descriptionForeground);
+  line-height: 1;
+}
+
+.dag-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: var(--vscode-descriptionForeground);
+  margin-bottom: 0.2rem;
+}
+
+.dag-value {
+  font-family: monospace;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.section-subtitle {
+  font-size: 0.82rem;
+  color: var(--vscode-descriptionForeground);
+  margin-top: -0.25rem;
+  margin-bottom: 0.6rem;
+}
+
+.dag-node-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.35rem;
+}
+
+.meta-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.meta-select-label {
+  font-size: 0.75rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.meta-dropdown {
+  background: var(--vscode-dropdown-background, var(--vscode-input-background));
+  color: var(--vscode-dropdown-foreground, var(--vscode-input-foreground));
+  border: 1px solid var(--vscode-dropdown-border, var(--vscode-editorWidget-border));
+  padding: 0.2rem 0.5rem;
+  border-radius: 3px;
+  font-size: 0.78rem;
+  font-family: inherit;
+  cursor: pointer;
+  max-width: 260px;
+}
+
+.meta-dropdown:focus {
+  outline: 1px solid var(--vscode-focusBorder);
+}
+
+.meta-badge-container {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 0.35rem;
+}
+
+.meta-pill {
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 3px;
+  background: rgba(59, 130, 246, 0.15);
+  color: #60a5fa;
+  border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+.meta-pill.historical {
+  background: rgba(245, 158, 11, 0.15);
+  color: #fbbf24;
+  border-color: rgba(245, 158, 11, 0.3);
+}
+
+/* ── Manifest Cards ─────────────────────────────────────────────────────────── */
+.manifests-section {
+  width: 100%;
+  max-width: 800px;
+  margin-top: 0.5rem;
+}
+
+.manifest-card {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.manifest-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.manifest-path {
+  font-family: monospace;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.manifest-stats {
+  display: flex;
+  gap: 0.75rem;
+  font-size: 0.8rem;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 0.35rem;
+}
+
+.manifest-summary {
+  font-size: 0.8rem;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 0.25rem;
+  font-style: italic;
+}
+
+/* ── Data Files Accordion ───────────────────────────────────────────────────── */
+.data-files-drawer {
+  display: none;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--vscode-editorWidget-border);
+}

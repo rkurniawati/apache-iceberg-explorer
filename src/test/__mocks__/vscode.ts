@@ -109,6 +109,7 @@ export const window = {
       webview: {
         html: '',
         cspSource: 'vscode-resource:',
+        asWebviewUri(uri: Uri) { return uri; },
         postMessage(msg: unknown) { messages.push(msg); },
         onDidReceiveMessage(handler: (msg: unknown) => void) {
           messageHandlers.push(handler);
