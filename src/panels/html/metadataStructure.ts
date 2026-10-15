@@ -29,7 +29,7 @@ export function getMetadataStructureHtml(
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource}; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Metadata Structure</title>
   <link rel="stylesheet" href="${commonCssHref}">
@@ -44,16 +44,16 @@ export function getMetadataStructureHtml(
   </div>
 
   <div id="error">
-    <div style="font-weight: 600; margin-bottom: 0.25rem;">Failed to load metadata structure</div>
+    <div class="error-title">Failed to load metadata structure</div>
     <div id="error-message"></div>
-    <button class="btn btn-secondary" id="retry-btn" style="margin-top: 0.75rem;">Retry</button>
+    <button class="btn btn-secondary error-retry-btn" id="retry-btn">Retry</button>
   </div>
 
-  <div id="content" style="display: none;">
+  <div id="content">
     <div class="header-bar">
       <div>
         <h1>Metadata Structure</h1>
-        <div style="font-size: 0.85rem; color: var(--vscode-descriptionForeground); margin-top: 0.2rem;">
+        <div class="header-subtitle">
           Iceberg metadata structure. Click any snapshot commit to view its manifest hierarchy.
         </div>
       </div>
@@ -73,14 +73,14 @@ export function getMetadataStructureHtml(
       <div class="timeline-scroll" id="timeline-scroll"></div>
       <div class="pagination-controls">
         <button class="btn btn-secondary" id="page-prev-btn">&larr; Newer Commits</button>
-        <span id="page-indicator" style="font-size: 0.85rem; color: var(--vscode-descriptionForeground);">Page 1</span>
+        <span id="page-indicator">Page 1</span>
         <button class="btn btn-secondary" id="page-next-btn">Older Commits &rarr;</button>
       </div>
     </div>
 
     <!-- Section 2: Snapshot Manifest Hierarchy -->
     <div class="section-title">
-      <span>Snapshot Manifest Hierarchy (Snapshot <span id="selected-snap-label" style="font-family: monospace;">#—</span>)</span>
+      <span>Snapshot Manifest Hierarchy (Snapshot <span id="selected-snap-label">#—</span>)</span>
     </div>
     <div class="section-subtitle">
       Manifest list and manifests associated with the snapshot selected above.
@@ -109,7 +109,7 @@ export function getMetadataStructureHtml(
           <span class="active-badge" id="snap-active-badge">Selected in Timeline</span>
         </div>
         <div class="dag-value" id="node-snap-id">Snapshot #—</div>
-        <div id="node-snap-meta" style="font-size: 0.8rem; color: var(--vscode-descriptionForeground); margin-top: 0.25rem;"></div>
+        <div id="node-snap-meta"></div>
       </div>
 
       <div class="dag-arrow">&darr;</div>
@@ -124,7 +124,7 @@ export function getMetadataStructureHtml(
 
       <!-- 4. Manifest Files (stops at manifest level with drill down) -->
       <div class="manifests-section">
-        <div class="dag-label" style="text-align: center; margin-bottom: 0.5rem;">Manifest Files (<span id="manifests-count">0</span>)</div>
+        <div class="dag-label dag-label-center">Manifest Files (<span id="manifests-count">0</span>)</div>
         <div id="manifests-list"></div>
       </div>
     </div>
@@ -249,7 +249,7 @@ export function getMetadataStructureHtml(
       document.getElementById('manifests-count').textContent = manifests.length;
 
       if (manifests.length === 0) {
-        list.innerHTML = '<div style="text-align: center; color: var(--vscode-descriptionForeground); padding: 1rem;">No manifests found for this snapshot</div>';
+        list.innerHTML = '<div class="empty-state">No manifests found for this snapshot</div>';
         return;
       }
 
@@ -265,11 +265,11 @@ export function getMetadataStructureHtml(
               <div class="manifest-stats">
                 <span>Partition Spec: #\${m.partitionSpecId}</span>
                 <span>&bull;</span>
-                <span style="color: #34d399;">+\${m.addedFiles} added</span>
+                <span class="stat-added">+\${m.addedFiles} added</span>
                 <span>&bull;</span>
                 <span>\${m.existingFiles} existing</span>
                 <span>&bull;</span>
-                <span style="color: #f87171;">-\${m.deletedFiles} deleted</span>
+                <span class="stat-deleted">-\${m.deletedFiles} deleted</span>
               </div>
               \${m.partitionSummary ? '<div class="manifest-summary">' + esc(m.partitionSummary) + '</div>' : ''}
             </div>
@@ -278,7 +278,7 @@ export function getMetadataStructureHtml(
             </div>
           </div>
           <div class="data-files-drawer" id="drawer-\${idx}">
-            <div class="spinner-small" id="spin-\${idx}" style="display: none; padding: 0.5rem; color: var(--vscode-descriptionForeground);">Loading data files…</div>
+            <div class="spinner-small hidden" id="spin-\${idx}">Loading data files…</div>
             <div id="drawer-content-\${idx}"></div>
           </div>
         \`;
@@ -401,11 +401,11 @@ export function getMetadataStructureHtml(
             content.innerHTML = '';
 
             if (msg.error) {
-              content.innerHTML = \`<div style="color: var(--vscode-errorForeground);">\${esc(msg.error)}</div>\`;
+              content.innerHTML = \`<div class="drawer-error">\${esc(msg.error)}</div>\`;
               return;
             }
             if (!msg.files || msg.files.length === 0) {
-              content.innerHTML = '<div style="color: var(--vscode-descriptionForeground); font-size: 0.82rem;">No data files found in this manifest</div>';
+              content.innerHTML = '<div class="drawer-empty">No data files found in this manifest</div>';
               return;
             }
 
@@ -427,12 +427,12 @@ export function getMetadataStructureHtml(
                   const sizeKb = (f.fileSizeInBytes / 1024).toFixed(1) + ' KB';
                   return \`
                     <tr>
-                      <td><span class="badge" style="font-size: 0.7rem;">\${esc(f.status)}</span></td>
-                      <td style="font-family: monospace; font-size: 0.82rem;">\${esc(fname)}</td>
+                      <td><span class="badge badge-sm">\${esc(f.status)}</span></td>
+                      <td class="file-path-cell">\${esc(fname)}</td>
                       <td>\${f.recordCount}</td>
-                      <td style="color: var(--vscode-descriptionForeground);">\${sizeKb}</td>
+                      <td class="file-size-cell">\${sizeKb}</td>
                       <td>
-                        \${isParquet ? \`<button class=\"action-link preview-btn\" data-path=\"\${esc(f.path)}\"\>Preview\</button\>\` : '—'}
+                        \${isParquet ? \`<button class="action-link preview-btn" data-path="\${esc(f.path)}">Preview</button>\` : '—'}
                       </td>
                     </tr>
                   \`;

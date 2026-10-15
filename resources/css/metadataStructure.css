@@ -305,3 +305,70 @@ h1 {
   padding-top: 0.75rem;
   border-top: 1px dashed var(--vscode-editorWidget-border);
 }
+
+#content {
+  display: none;
+}
+
+.header-subtitle {
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 0.2rem;
+}
+
+#page-indicator {
+  font-size: 0.85rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+#selected-snap-label {
+  font-family: monospace;
+}
+
+#node-snap-meta {
+  font-size: 0.8rem;
+  color: var(--vscode-descriptionForeground);
+  margin-top: 0.25rem;
+}
+
+.dag-label-center {
+  text-align: center;
+  margin-bottom: 0.5rem;
+}
+
+.empty-state {
+  text-align: center;
+  color: var(--vscode-descriptionForeground);
+  padding: 1rem;
+}
+
+.stat-added {
+  color: #34d399;
+}
+
+.stat-deleted {
+  color: #f87171;
+}
+
+.spinner-small {
+  padding: 0.5rem;
+  color: var(--vscode-descriptionForeground);
+}
+
+.drawer-error {
+  color: var(--vscode-errorForeground);
+}
+
+.drawer-empty {
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.82rem;
+}
+
+.file-path-cell {
+  font-family: monospace;
+  font-size: 0.82rem;
+}
+
+.file-size-cell {
+  color: var(--vscode-descriptionForeground);
+}

@@ -183,6 +183,19 @@ button.btn:disabled {
   border-radius: 3px;
 }
 
+.error-title {
+  font-weight: 600;
+  margin-bottom: 0.25rem;
+}
+
+.error-retry-btn {
+  margin-top: 0.75rem;
+}
+
+.badge-sm {
+  font-size: 0.7rem;
+}
+
 /* ── Utilities ──────────────────────────────────────────────────────────────── */
 .hidden {
   display: none !important;
