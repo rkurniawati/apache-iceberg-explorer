@@ -1,0 +1,289 @@
+/**
+ * Metadata Detail Panel Styles.
+ * All colours use VS Code theme variables (--vscode-*).
+ */
+
+/* ── Top Bar & Format Version Badge ─────────────────────────────────────────── */
+#top-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+#top-bar #format-version-badge {
+  margin-bottom: 0;
+}
+
+#format-version-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 3px;
+  font-size: 0.85em;
+  font-weight: 600;
+  margin-bottom: 0.75rem;
+}
+
+.view-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-left: auto;
+}
+
+button.btn.btn-active {
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-color: var(--vscode-focusBorder, transparent);
+}
+
+/* ── Raw JSON View (Formatted for Humans) ──────────────────────────────────── */
+#raw-json-container {
+  margin-top: 0.5rem;
+}
+
+.raw-json-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+}
+
+.raw-json-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.raw-json-title {
+  font-weight: 700;
+  font-size: 1em;
+  color: var(--vscode-editor-foreground);
+}
+
+.raw-json-stats {
+  font-size: 0.85em;
+  color: var(--vscode-descriptionForeground);
+}
+
+.raw-json-pre {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  border-radius: 4px;
+  padding: 1rem;
+  margin: 0;
+  overflow: auto;
+  max-height: 80vh;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: var(--vscode-editor-font-size, 12px);
+  line-height: 1.5;
+  tab-size: 2;
+  white-space: pre;
+  word-break: normal;
+}
+
+.raw-json-code {
+  font-family: inherit;
+  font-size: inherit;
+}
+
+/* Syntax highlighting tokens — reference --vscode-* variables (NFR-9) */
+.json-key {
+  color: var(--vscode-symbolIcon-propertyForeground, var(--vscode-textLink-foreground));
+  font-weight: 600;
+}
+
+.json-string {
+  color: var(--vscode-symbolIcon-stringForeground, var(--vscode-editor-foreground));
+}
+
+.json-number {
+  color: var(--vscode-symbolIcon-numberForeground, var(--vscode-editor-foreground));
+}
+
+.json-boolean {
+  color: var(--vscode-symbolIcon-booleanForeground, var(--vscode-textLink-foreground));
+  font-weight: 600;
+}
+
+.json-null {
+  color: var(--vscode-symbolIcon-nullForeground, var(--vscode-descriptionForeground));
+  font-style: italic;
+}
+
+/* ── Sections ───────────────────────────────────────────────────────────────── */
+.section {
+  margin-bottom: 1.5rem;
+}
+
+.section-heading {
+  font-size: 1em;
+  font-weight: 700;
+  margin: 0 0 0.5rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  color: var(--vscode-editor-foreground);
+}
+
+.section-heading .badge-active {
+  display: inline-block;
+  margin-left: 0.5rem;
+  padding: 0.1em 0.4em;
+  font-size: 0.78em;
+  font-weight: 600;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border-radius: 3px;
+  vertical-align: middle;
+}
+
+/* ── Key-value List (Identity Fields) ───────────────────────────────────────── */
+.kv-list {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 1rem;
+  margin: 0;
+}
+
+.kv-key {
+  font-weight: 600;
+  white-space: nowrap;
+  color: var(--vscode-editor-foreground);
+}
+
+.kv-value {
+  word-break: break-all;
+  color: var(--vscode-editor-foreground);
+}
+
+/* ── Data Tables ────────────────────────────────────────────────────────────── */
+.data-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.9em;
+}
+
+.data-table th {
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-bottom: 2px solid var(--vscode-editorWidget-border);
+  font-weight: 700;
+  color: var(--vscode-editor-foreground);
+  background: var(--vscode-editor-background);
+  white-space: nowrap;
+}
+
+.data-table td {
+  padding: 0.25rem 0.5rem;
+  border-bottom: 1px solid var(--vscode-editorWidget-border);
+  vertical-align: top;
+  word-break: break-word;
+  color: var(--vscode-editor-foreground);
+}
+
+.data-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* ── Manifest List Link ─────────────────────────────────────────────────────── */
+.manifest-list-link {
+  color: var(--vscode-textLink-foreground);
+  cursor: pointer;
+  text-decoration: underline;
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  text-align: left;
+}
+
+.manifest-list-link:hover {
+  opacity: 0.8;
+}
+
+.sub-table {
+  margin: 0.25rem 0 0.25rem 1rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+/* ── Loading Indicator ──────────────────────────────────────────────────────── */
+#loading-indicator {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 1rem 0;
+  color: var(--vscode-editor-foreground);
+}
+
+/* ── Error Area ─────────────────────────────────────────────────────────────── */
+#error-area {
+  display: none;
+  padding: 1rem;
+  border: 1px solid var(--vscode-errorForeground);
+  border-radius: 4px;
+  color: var(--vscode-errorForeground);
+  margin: 1rem 0;
+}
+
+#error-area p {
+  margin: 0 0 0.5rem;
+}
+
+#error-retry-btn {
+  padding: 0.3rem 0.8rem;
+  background: var(--vscode-badge-background);
+  color: var(--vscode-badge-foreground);
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  font: inherit;
+}
+
+#error-retry-btn:hover {
+  opacity: 0.85;
+}
+
+/* ── Content Area ───────────────────────────────────────────────────────────── */
+#content-area {
+  display: none;
+}
+
+.empty-msg {
+  color: var(--vscode-editor-foreground);
+  opacity: 0.7;
+  font-style: italic;
+}
+
+/* ── View SQL Box ───────────────────────────────────────────────────────────── */
+.view-sql-info {
+  margin-bottom: 0.75rem;
+  color: var(--vscode-descriptionForeground);
+  font-size: 0.85rem;
+}
+
+.view-dialect-badge {
+  margin-right: 1rem;
+}
+
+.view-sql-pre {
+  background: var(--vscode-editor-background);
+  border: 1px solid var(--vscode-editorWidget-border);
+  padding: 0.8rem;
+  border-radius: 3px;
+  overflow: auto;
+  max-height: 400px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.5;
+}

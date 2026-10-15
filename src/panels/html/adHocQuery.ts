@@ -8,12 +8,16 @@
 import { generateNonce } from './metadataDetail.js';
 import {
   breadcrumbHtml,
-  BREADCRUMB_CSS,
   RENDER_TABLE_SCRIPT,
   escHtml,
 } from './shared.js';
 
 export { generateNonce };
+
+export interface AdHocQueryStyleUris {
+  commonCssUri?: string | { toString(): string };
+  panelCssUri?: string | { toString(): string };
+}
 
 /**
  * Produce the HTML shell for the ad-hoc query panel.
@@ -24,76 +28,22 @@ export function getAdHocQueryHtml(
   cspSource: string,
   resourcePath: string,
   initialSql?: string,
+  styleUris?: AdHocQueryStyleUris,
 ): string {
   const queryText = initialSql ? escHtml(initialSql) : 'SELECT * FROM data LIMIT 100;';
+  const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
+  const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/adHocQuery.css';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Ad-hoc Query</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, sans-serif);
-      font-size: var(--vscode-font-size, 13px);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0; padding: 0 1rem 2rem;
-    }
-${BREADCRUMB_CSS}
-    #query-area { margin-bottom: 0.75rem; }
-    #sql-input {
-      width: 100%; min-height: 6rem; max-height: 20rem;
-      font-family: var(--vscode-editor-font-family, monospace);
-      font-size: var(--vscode-editor-font-size, 13px);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-input-background);
-      border: 1px solid var(--vscode-input-border);
-      padding: 0.4rem; resize: vertical;
-    }
-    #sql-input:focus { outline: 1px solid var(--vscode-focusBorder); }
-    #btn-row { display: flex; gap: 0.5rem; margin-top: 0.5rem; align-items: center; }
-    #run-btn {
-      background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-      border: none; padding: 0.4rem 0.9rem; cursor: pointer; border-radius: 3px;
-    }
-    #run-btn:hover:not(:disabled) { background: var(--vscode-button-hoverBackground); }
-    #run-btn:disabled { opacity: 0.5; cursor: default; }
-    #cancel-btn {
-      display: none;
-      background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground);
-      border: 1px solid var(--vscode-button-secondaryBackground); padding: 0.4rem 0.9rem;
-      cursor: pointer; border-radius: 3px;
-    }
-    #cancel-btn:hover { background: var(--vscode-button-secondaryHoverBackground); }
-    #status-text { color: var(--vscode-descriptionForeground); font-size: 0.9em; }
-    #cap-banner {
-      display: none; padding: 0.4rem 0.8rem; margin-bottom: 0.5rem;
-      background: var(--vscode-inputValidation-warningBackground, #332b00);
-      color: var(--vscode-inputValidation-warningForeground, #cca700);
-      border: 1px solid var(--vscode-inputValidation-warningBorder, #cca700);
-      border-radius: 3px;
-    }
-    #error-area {
-      display: none; padding: 0.75rem; color: var(--vscode-editorError-foreground);
-      border: 1px solid var(--vscode-editorError-foreground); border-radius: 4px; margin-bottom: 0.5rem;
-      white-space: pre-wrap; word-break: break-word;
-    }
-    #table-wrapper { display: none; overflow: auto; max-height: 60vh; }
-    table { border-collapse: collapse; font-size: var(--vscode-font-size, 13px); min-width: 100%; }
-    th {
-      text-align: left; padding: 0.4rem 0.6rem; position: sticky; top: 0;
-      border-bottom: 2px solid var(--vscode-editorWidget-border);
-      background: var(--vscode-editor-background);
-      color: var(--vscode-descriptionForeground); font-weight: 600;
-    }
-    td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--vscode-editorWidget-border); white-space: nowrap; }
-    tr:hover td { background: var(--vscode-list-hoverBackground); }
-  </style>
+  <link rel="stylesheet" href="${commonCssHref}">
+  <link rel="stylesheet" href="${panelCssHref}">
 </head>
 <body>
   <div id="breadcrumb">${breadcrumbHtml(resourcePath)}</div>

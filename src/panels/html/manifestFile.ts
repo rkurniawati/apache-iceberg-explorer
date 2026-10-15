@@ -9,13 +9,16 @@ import { generateNonce } from './metadataDetail.js';
 import {
   escHtml,
   breadcrumbHtml,
-  BREADCRUMB_CSS,
-  TABLE_CSS,
   SET_STATE_SCRIPT,
   ESC_SCRIPT,
 } from './shared.js';
 
 export { generateNonce };
+
+export interface ManifestFileStyleUris {
+  commonCssUri?: string | { toString(): string };
+  panelCssUri?: string | { toString(): string };
+}
 
 /**
  * Produce the HTML shell for the manifest file panel.
@@ -24,50 +27,21 @@ export function getManifestFileHtml(
   nonce: string,
   cspSource: string,
   resourcePath: string,
+  styleUris?: ManifestFileStyleUris,
 ): string {
+  const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
+  const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/manifestFile.css';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Manifest File</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, sans-serif);
-      font-size: var(--vscode-font-size, 13px);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0; padding: 0 1rem 2rem;
-    }
-${BREADCRUMB_CSS}
-    #loading { padding: 1rem; color: var(--vscode-descriptionForeground); }
-    #error {
-      display: none; padding: 1rem; color: var(--vscode-editorError-foreground);
-      border: 1px solid var(--vscode-editorError-foreground); border-radius: 4px; margin-top: 1rem;
-    }
-    #error-message { margin-bottom: 0.5rem; }
-    #retry-btn {
-      background: var(--vscode-button-background); color: var(--vscode-button-foreground);
-      border: none; padding: 0.4rem 0.8rem; cursor: pointer; border-radius: 3px;
-    }
-    #retry-btn:hover { background: var(--vscode-button-hoverBackground); }
-${TABLE_CSS}
-    .badge {
-      display: inline-block; padding: 0.1rem 0.4rem; border-radius: 3px;
-      font-size: 0.85em; font-weight: 600;
-    }
-    .badge-existing { color: var(--vscode-disabledForeground); }
-    .badge-added    { color: var(--vscode-terminal-ansiGreen); }
-    .badge-deleted  { color: var(--vscode-terminal-ansiRed); }
-    .file-link {
-      color: var(--vscode-textLink-foreground); cursor: pointer; text-decoration: underline;
-      background: none; border: none; padding: 0; font: inherit; text-align: left;
-    }
-    .file-link:hover { opacity: 0.8; }
-  </style>
+  <link rel="stylesheet" href="${commonCssHref}">
+  <link rel="stylesheet" href="${panelCssHref}">
 </head>
 <body>
   <div id="breadcrumb">${breadcrumbHtml(resourcePath)}</div>

@@ -8,236 +8,34 @@
  *  - Embedded Data Preview with DuckDB-WASM
  *  - Snapshots list with link to Metadata Structure
  */
-import { escHtml, breadcrumbHtml, BREADCRUMB_CSS, TABLE_CSS } from './shared.js';
+import { escHtml, breadcrumbHtml } from './shared.js';
 import type { LoadTableOverviewMessage, LoadDataPreviewMessage } from '../messages.js';
+
+export interface TableOverviewStyleUris {
+  commonCssUri?: string | { toString(): string };
+  panelCssUri?: string | { toString(): string };
+}
 
 export function getTableOverviewHtml(
   nonce: string,
   cspSource: string,
   tablePath: string,
+  styleUris?: TableOverviewStyleUris,
 ): string {
   const initialBreadcrumb = breadcrumbHtml(tablePath);
+  const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
+  const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/tableOverview.css';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Table Overview</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, sans-serif);
-      font-size: var(--vscode-font-size, 13px);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0;
-      padding: 0 1.25rem 2rem;
-    }
-
-    ${BREADCRUMB_CSS}
-    ${TABLE_CSS}
-
-    /* ── Header ─────────────────────────────────────────────────────────── */
-    .header-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid var(--vscode-editorWidget-border);
-    }
-    .header-main { display: flex; flex-direction: column; gap: 0.35rem; }
-    .title-row { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
-    h1 { margin: 0; font-size: 1.5rem; font-weight: 600; }
-    .badge {
-      display: inline-block;
-      padding: 0.15rem 0.5rem;
-      border-radius: 3px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-    }
-    .badge-v1 { background: #3b82f6; color: #fff; }
-    .badge-v2 { background: #10b981; color: #fff; }
-    .badge-v3 { background: #8b5cf6; color: #fff; }
-
-    .meta-details {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1.2rem;
-      color: var(--vscode-descriptionForeground);
-      font-size: 0.85rem;
-    }
-    .meta-item strong { color: var(--vscode-editor-foreground); }
-
-    .actions-bar {
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-    button.btn {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      border: 1px solid var(--vscode-button-border, transparent);
-      padding: 0.4rem 0.8rem;
-      border-radius: 2px;
-      cursor: pointer;
-      font-size: 0.82rem;
-      font-weight: 500;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-    button.btn:hover { background: var(--vscode-button-hoverBackground); }
-    button.btn-secondary {
-      background: var(--vscode-button-secondaryBackground, #3a3d41);
-      color: var(--vscode-button-secondaryForeground, #fff);
-    }
-    button.btn-secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground, #45494e);
-    }
-
-    /* ── Tabs ───────────────────────────────────────────────────────────── */
-    .tabs-bar {
-      display: flex;
-      gap: 0.25rem;
-      border-bottom: 1px solid var(--vscode-editorWidget-border);
-      margin-bottom: 1.25rem;
-    }
-    .tab-btn {
-      background: none;
-      border: none;
-      border-bottom: 2px solid transparent;
-      padding: 0.6rem 1rem;
-      cursor: pointer;
-      color: var(--vscode-descriptionForeground);
-      font: inherit;
-      font-weight: 500;
-      font-size: 0.9rem;
-    }
-    .tab-btn:hover { color: var(--vscode-editor-foreground); }
-    .tab-btn.active {
-      color: var(--vscode-editor-foreground);
-      border-bottom-color: var(--vscode-panelTitle-activeBorder, var(--vscode-textLink-foreground));
-      font-weight: 600;
-    }
-
-    /* ── Partition Badges ────────────────────────────────────────────────── */
-    .partition-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.4rem;
-      margin: 0.75rem 0 1.25rem;
-    }
-    .chip {
-      background: var(--vscode-badge-background);
-      color: var(--vscode-badge-foreground);
-      padding: 0.25rem 0.6rem;
-      border-radius: 12px;
-      font-size: 0.8rem;
-      border: 1px solid var(--vscode-editorWidget-border);
-    }
-
-    /* ── Search & Filter Box ────────────────────────────────────────────── */
-    .filter-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.75rem;
-      gap: 0.5rem;
-    }
-    input.search-input {
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, #3c3c3c);
-      padding: 0.35rem 0.6rem;
-      border-radius: 2px;
-      font: inherit;
-      font-size: 0.85rem;
-      width: 250px;
-    }
-    input.search-input:focus {
-      outline: 1px solid var(--vscode-focusBorder);
-    }
-
-    /* ── Snapshots Timeline ──────────────────────────────────────────────── */
-    .timeline-list {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-      margin-top: 0.75rem;
-    }
-    .timeline-card {
-      background: var(--vscode-editorWidget-background);
-      border: 1px solid var(--vscode-editorWidget-border);
-      border-radius: 4px;
-      padding: 0.75rem 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-    }
-    .timeline-left { display: flex; flex-direction: column; gap: 0.25rem; }
-    .timeline-id { font-family: monospace; font-weight: 600; color: var(--vscode-textLink-foreground); }
-    .timeline-meta { font-size: 0.8rem; color: var(--vscode-descriptionForeground); }
-    .op-badge {
-      display: inline-block;
-      padding: 0.1rem 0.4rem;
-      border-radius: 3px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-    .op-append { background: #065f46; color: #34d399; }
-    .op-overwrite { background: #9a3412; color: #fdba74; }
-    .op-replace { background: #3730a3; color: #a5b4fc; }
-    .op-delete { background: #991b1b; color: #f87171; }
-
-    /* ── Loading & Error states ─────────────────────────────────────────── */
-    #loading {
-      padding: 3rem 1rem;
-      text-align: center;
-      color: var(--vscode-descriptionForeground);
-    }
-    .spinner {
-      display: inline-block;
-      width: 28px;
-      height: 28px;
-      border: 3px solid var(--vscode-editorWidget-border);
-      border-top-color: var(--vscode-textLink-foreground);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 0.75rem;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    #error {
-      display: none;
-      margin-top: 1rem;
-      padding: 1rem;
-      border: 1px solid var(--vscode-inputValidation-errorBorder, #f14c4c);
-      background: var(--vscode-inputValidation-errorBackground, rgba(241,76,76,0.1));
-      color: var(--vscode-inputValidation-errorForeground, var(--vscode-editor-foreground));
-      border-radius: 3px;
-    }
-
-    .pagination-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-top: 1rem;
-      padding-top: 0.5rem;
-      border-top: 1px solid var(--vscode-editorWidget-border);
-    }
-  </style>
+  <link rel="stylesheet" href="${commonCssHref}">
+  <link rel="stylesheet" href="${panelCssHref}">
 </head>
 <body>
   <div id="breadcrumb">${initialBreadcrumb}</div>

@@ -217,6 +217,11 @@ export class WebviewPanelManager {
     private readonly getConnectionConfigs?: () => ConnectionConfig[],
   ) {}
 
+  private toWebviewUri(webview: vscode.Webview, ...pathSegments: string[]): vscode.Uri {
+    const fileUri = vscode.Uri.joinPath(this.context.extensionUri, ...pathSegments);
+    return typeof webview.asWebviewUri === 'function' ? webview.asWebviewUri(fileUri) : fileUri;
+  }
+
   // ── Public API ─────────────────────────────────────────────────────────────
 
   /**
@@ -261,6 +266,7 @@ export class WebviewPanelManager {
       {
         enableScripts: true,
         retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
       },
     );
 
@@ -268,7 +274,12 @@ export class WebviewPanelManager {
 
     // Render the HTML shell immediately so the user sees a loading state.
     const nonce = generateNonce();
-    panel.webview.html = getMetadataDetailHtml(nonce, panel.webview.cspSource);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'metadataDetail.css');
+    panel.webview.html = getMetadataDetailHtml(nonce, panel.webview.cspSource, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     const record: PanelRecord = { panel, resourcePath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
@@ -360,7 +371,11 @@ export class WebviewPanelManager {
       PanelType.ManifestList,
       title,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'manifestList');
@@ -399,7 +414,12 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    panel.webview.html = getManifestListHtml(nonce, panel.webview.cspSource, resourcePath);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'manifestList.css');
+    panel.webview.html = getManifestListHtml(nonce, panel.webview.cspSource, resourcePath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     this.logger.info(`Panel opened: type=manifestList resource=${resourcePath}`);
 
@@ -484,7 +504,11 @@ export class WebviewPanelManager {
       PanelType.ManifestFile,
       title,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'manifestFile');
@@ -523,7 +547,12 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    panel.webview.html = getManifestFileHtml(nonce, panel.webview.cspSource, resourcePath);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'manifestFile.css');
+    panel.webview.html = getManifestFileHtml(nonce, panel.webview.cspSource, resourcePath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     this.logger.info(`Panel opened: type=manifestFile resource=${resourcePath}`);
 
@@ -604,7 +633,11 @@ export class WebviewPanelManager {
       PanelType.ParquetPreview,
       title,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'parquetPreview');
@@ -643,7 +676,12 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    panel.webview.html = getParquetPreviewHtml(nonce, panel.webview.cspSource, resourcePath);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'parquetPreview.css');
+    panel.webview.html = getParquetPreviewHtml(nonce, panel.webview.cspSource, resourcePath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     this.logger.info(`Panel opened: type=parquetPreview resource=${resourcePath}`);
 
@@ -729,7 +767,11 @@ export class WebviewPanelManager {
       PanelType.AdHocQuery,
       title,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     // Start in idle state
@@ -786,7 +828,18 @@ export class WebviewPanelManager {
       this.context.subscriptions,
     );
 
-    panel.webview.html = getAdHocQueryHtml(nonce, panel.webview.cspSource, resourcePath, initialSql);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'adHocQuery.css');
+    panel.webview.html = getAdHocQueryHtml(
+      nonce,
+      panel.webview.cspSource,
+      resourcePath,
+      initialSql,
+      {
+        commonCssUri,
+        panelCssUri,
+      },
+    );
 
     this.logger.info(`Panel opened: type=adHocQuery resource=${resourcePath}`);
   }
@@ -1197,11 +1250,19 @@ export class WebviewPanelManager {
       PanelType.Settings,
       'Iceberg Explorer — Settings',
       vscode.ViewColumn.One,
-      { enableScripts: true },
+      {
+        enableScripts: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const initialConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : [];
-    panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'settings.css');
+    panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     // Cast to PanelRecord — settings panels carry no resourcePath or handle;
     // use sentinel values to satisfy the interface without widening the type.
@@ -1635,12 +1696,21 @@ export class WebviewPanelManager {
       PanelType.TableOverview,
       `${title} — Overview`,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'tableOverview');
     const nonce = generateNonce();
-    panel.webview.html = getTableOverviewHtml(nonce, panel.webview.cspSource, tablePath);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'tableOverview.css');
+    panel.webview.html = getTableOverviewHtml(nonce, panel.webview.cspSource, tablePath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     const record: PanelRecord = { panel, resourcePath: tablePath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
@@ -1734,12 +1804,21 @@ export class WebviewPanelManager {
       PanelType.ConnectionDashboard,
       `${config.label} — Dashboard`,
       vscode.ViewColumn.One,
-      { enableScripts: true, retainContextWhenHidden: true },
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: [this.context.extensionUri],
+      },
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'connectionDashboard');
     const nonce = generateNonce();
-    panel.webview.html = getConnectionDashboardHtml(nonce, panel.webview.cspSource);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'connectionDashboard.css');
+    panel.webview.html = getConnectionDashboardHtml(nonce, panel.webview.cspSource, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     const record: PanelRecord = { panel, resourcePath: config.id, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
@@ -1836,7 +1915,12 @@ export class WebviewPanelManager {
     );
 
     const gate = new WebviewReadyGate(panel, this.logger, 'schemaOverview');
-    panel.webview.html = getSchemaOverviewHtml(nonce, panel.webview.cspSource, schemaPath);
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'schemaOverview.css');
+    panel.webview.html = getSchemaOverviewHtml(nonce, panel.webview.cspSource, schemaPath, {
+      commonCssUri,
+      panelCssUri,
+    });
 
     const record: PanelRecord = { panel, resourcePath: schemaPath, handle, adapter: effectiveAdapter, gate };
     this.registry.set(key, record);
@@ -1941,12 +2025,8 @@ export class WebviewPanelManager {
 
     const gate = new WebviewReadyGate(panel, this.logger, 'metadataStructure');
     const nonce = generateNonce();
-    const commonCssUri = panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'css', 'common.css'),
-    );
-    const panelCssUri = panel.webview.asWebviewUri(
-      vscode.Uri.joinPath(this.context.extensionUri, 'resources', 'css', 'metadataStructure.css'),
-    );
+    const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
+    const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'metadataStructure.css');
     panel.webview.html = getMetadataStructureHtml(nonce, panel.webview.cspSource, cleanTablePath, {
       commonCssUri,
       panelCssUri,

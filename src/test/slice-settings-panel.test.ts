@@ -47,6 +47,7 @@ async function withFakePanel(fn: (api: {
     webview: {
       html: '',
       cspSource: 'vscode-resource:',
+      asWebviewUri: (uri: any) => uri,
       postMessage(msg: { type: string; [k: string]: unknown }) { messages.push(msg); },
       onDidReceiveMessage(handler: (msg: unknown) => void) {
         msgHandler = handler;
@@ -174,6 +175,7 @@ void (async () => {
         webview: {
           html: '',
           cspSource: 'vscode-resource:',
+          asWebviewUri: (uri: any) => uri,
           postMessage() {},
           onDidReceiveMessage() { return { dispose() {} }; },
         },

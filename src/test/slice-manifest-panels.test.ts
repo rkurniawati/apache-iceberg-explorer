@@ -176,6 +176,7 @@ function withInterceptedPanel(
       webview: {
         html: '',
         cspSource: 'vscode-resource:',
+        asWebviewUri: (uri: any) => uri,
         postMessage(msg: PostedMessage) { messages.push(msg); },
         onDidReceiveMessage(handler: (msg: unknown) => void) {
           fake.messageHandlers.push(handler);

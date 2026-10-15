@@ -7,208 +7,32 @@
  *  - Searchable tables roster with direct jump buttons
  *  - Quick launch action bar
  */
-import { escHtml, TABLE_CSS } from './shared.js';
+import { escHtml } from './shared.js';
 import type { LoadConnectionDashboardMessage } from '../messages.js';
+
+export interface ConnectionDashboardStyleUris {
+  commonCssUri?: string | { toString(): string };
+  panelCssUri?: string | { toString(): string };
+}
 
 export function getConnectionDashboardHtml(
   nonce: string,
   cspSource: string,
+  styleUris?: ConnectionDashboardStyleUris,
 ): string {
+  const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
+  const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/connectionDashboard.css';
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Connection Dashboard</title>
-  <style>
-    *, *::before, *::after { box-sizing: border-box; }
-    body {
-      font-family: var(--vscode-font-family, sans-serif);
-      font-size: var(--vscode-font-size, 13px);
-      color: var(--vscode-editor-foreground);
-      background: var(--vscode-editor-background);
-      margin: 0;
-      padding: 1.25rem 1.5rem 2.5rem;
-    }
-
-    ${TABLE_CSS}
-
-    .header-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid var(--vscode-editorWidget-border);
-      flex-wrap: wrap;
-    }
-    .header-title-row { display: flex; align-items: center; gap: 0.75rem; }
-    h1 { margin: 0; font-size: 1.5rem; font-weight: 600; }
-    .status-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-      padding: 0.2rem 0.6rem;
-      border-radius: 12px;
-      font-size: 0.78rem;
-      font-weight: 600;
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.3);
-    }
-    .status-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 50%;
-      background: #10b981;
-    }
-
-    .actions-bar {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-    button.btn {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      border: 1px solid var(--vscode-button-border, transparent);
-      padding: 0.4rem 0.8rem;
-      border-radius: 2px;
-      cursor: pointer;
-      font-size: 0.82rem;
-      font-weight: 500;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.35rem;
-    }
-    button.btn:hover { background: var(--vscode-button-hoverBackground); }
-    button.btn-secondary {
-      background: var(--vscode-button-secondaryBackground, #3a3d41);
-      color: var(--vscode-button-secondaryForeground, #fff);
-    }
-    button.btn-secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground, #45494e);
-    }
-
-    /* ── Metrics Cards Grid ─────────────────────────────────────────────── */
-    .cards-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-    .card {
-      background: var(--vscode-editorWidget-background);
-      border: 1px solid var(--vscode-editorWidget-border);
-      border-radius: 4px;
-      padding: 1rem 1.2rem;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-    .card-title {
-      font-size: 0.82rem;
-      text-transform: uppercase;
-      font-weight: 600;
-      color: var(--vscode-descriptionForeground);
-      letter-spacing: 0.5px;
-    }
-    .card-main-val {
-      font-size: 1.8rem;
-      font-weight: 700;
-      color: var(--vscode-editor-foreground);
-    }
-    .card-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.85rem;
-      padding: 0.2rem 0;
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-    }
-    .card-row-label { color: var(--vscode-descriptionForeground); }
-    .card-row-val { font-weight: 500; word-break: break-all; }
-
-    /* ── Table Roster ───────────────────────────────────────────────────── */
-    .roster-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.75rem;
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-    .roster-title { font-size: 1.1rem; font-weight: 600; }
-    input.search-input {
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, #3c3c3c);
-      padding: 0.35rem 0.6rem;
-      border-radius: 2px;
-      font: inherit;
-      font-size: 0.85rem;
-      width: 250px;
-    }
-    input.search-input:focus {
-      outline: 1px solid var(--vscode-focusBorder);
-    }
-
-    .action-link {
-      color: var(--vscode-textLink-foreground);
-      cursor: pointer;
-      text-decoration: underline;
-      background: none;
-      border: none;
-      padding: 0;
-      font: inherit;
-      margin-right: 0.75rem;
-    }
-    .action-link:hover { opacity: 0.8; }
-
-    .table-link {
-      color: var(--vscode-textLink-foreground);
-      font-weight: 600;
-      cursor: pointer;
-      text-decoration: none;
-      background: none;
-      border: none;
-      padding: 0;
-      font: inherit;
-      text-align: left;
-    }
-    .table-link:hover {
-      text-decoration: underline;
-    }
-
-    #loading {
-      padding: 3rem 1rem;
-      text-align: center;
-      color: var(--vscode-descriptionForeground);
-    }
-    .spinner {
-      display: inline-block;
-      width: 28px;
-      height: 28px;
-      border: 3px solid var(--vscode-editorWidget-border);
-      border-top-color: var(--vscode-textLink-foreground);
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      margin-bottom: 0.75rem;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    #error {
-      display: none;
-      margin-top: 1rem;
-      padding: 1rem;
-      border: 1px solid var(--vscode-inputValidation-errorBorder, #f14c4c);
-      background: var(--vscode-inputValidation-errorBackground, rgba(241,76,76,0.1));
-      color: var(--vscode-inputValidation-errorForeground, var(--vscode-editor-foreground));
-      border-radius: 3px;
-    }
-  </style>
+  <link rel="stylesheet" href="${commonCssHref}">
+  <link rel="stylesheet" href="${panelCssHref}">
 </head>
 <body>
   <div id="loading">
