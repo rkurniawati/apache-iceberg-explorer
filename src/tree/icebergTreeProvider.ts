@@ -19,6 +19,7 @@ import type { StorageAdapter } from '../storage/StorageAdapter.js';
 import type { ActiveConnectionHandle } from '../storage/types.js';
 import { isStorageError } from '../storage/errors.js';
 import type { ConnectionConfig } from '../connection/types.js';
+import { globalLocationResolver } from '../storage/locationResolver.js';
 import {
   IcebergTreeItem,
   makeConnectionItem,
@@ -189,11 +190,14 @@ export class IcebergTreeProvider
    */
   findItemByPath(resourcePath: string): IcebergTreeItem | undefined {
     const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '');
+    const activeCfg = this.configs.find((c) => c.id === this.activeConnectionId);
+    const resolved = globalLocationResolver.resolvePath(resourcePath, activeCfg?.warehousePath);
     const normTarget = norm(resourcePath);
+    const normResolved = norm(resolved);
 
     // Check saved connections first
     const conn = this.configs.find(
-      (c) => c.id === resourcePath || norm(c.warehousePath) === normTarget
+      (c) => c.id === resourcePath || norm(c.warehousePath) === normTarget || norm(c.warehousePath) === normResolved
     );
     if (conn) {
       return makeConnectionItem(conn, conn.id === this.activeConnectionId);
@@ -201,7 +205,11 @@ export class IcebergTreeProvider
 
     for (const children of this.cache.values()) {
       for (const child of children) {
-        if (child.resourcePath === resourcePath || norm(child.resourcePath) === normTarget) {
+        if (
+          child.resourcePath === resourcePath ||
+          norm(child.resourcePath) === normTarget ||
+          norm(child.resourcePath) === normResolved
+        ) {
           return child;
         }
       }
@@ -550,16 +558,17 @@ export class IcebergTreeProvider
    */
   async resolveItemByPath(resourcePath: string): Promise<IcebergTreeItem | undefined> {
     const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/$/, '');
-    const targetNorm = norm(resourcePath);
+    let activeCfg = this.configs.find((c) => c.id === this.activeConnectionId);
+    const resolvedPath = globalLocationResolver.resolvePath(resourcePath, activeCfg?.warehousePath);
+    const targetNorm = norm(resolvedPath);
 
     // 1. Fast path: check if already in cache or matches a connection
-    const existing = this.findItemByPath(resourcePath);
+    const existing = this.findItemByPath(resourcePath) ?? this.findItemByPath(resolvedPath);
     if (existing) {
       return existing;
     }
 
     // 2. Identify the active or matching connection
-    let activeCfg = this.configs.find((c) => c.id === this.activeConnectionId);
     let warehouseNorm = activeCfg ? norm(activeCfg.warehousePath) : '';
 
     if (!activeCfg || (targetNorm !== warehouseNorm && !targetNorm.startsWith(warehouseNorm + '/'))) {

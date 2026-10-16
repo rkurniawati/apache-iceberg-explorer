@@ -11,8 +11,10 @@
  *        (FR-11, FR-12, FR-13, FR-14–FR-17, NFR-6, design.md §2.6)
  */
 import * as vscode from 'vscode';
+import * as path from 'node:path';
 
 import type { ILogger } from '../extension.js';
+import { globalLocationResolver } from '../storage/locationResolver.js';
 import type { StorageAdapter } from '../storage/StorageAdapter.js';
 import type { ActiveConnectionHandle } from '../storage/types.js';
 import { isStorageError, type ErrorClass, type StorageError } from '../storage/errors.js';
@@ -344,8 +346,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
     if (this.revealPath) {
-      void this.revealPath(resourcePath);
+      void this.revealPath(effectivePath);
     }
     const key = panelRegistryKey(PanelType.ManifestList, resourcePath);
     const existing = this.registry.get(key);
@@ -356,16 +359,16 @@ export class WebviewPanelManager {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=manifestList resource=${resourcePath}`);
       if (existing.gate?.hasError()) {
-        void this.loadManifestListPanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadManifestListPanel(existing.gate, key, effectivePath, handle, adapter);
       } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
-        void this.loadManifestListPanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadManifestListPanel(existing.gate, key, effectivePath, handle, adapter);
       }
       return;
     }
 
-    const title = lastPathSegment(resourcePath);
+    const title = lastPathSegment(effectivePath);
     const nonce = generateNonce();
     const panel = vscode.window.createWebviewPanel(
       PanelType.ManifestList,
@@ -390,7 +393,7 @@ export class WebviewPanelManager {
       panel.onDidChangeViewState(
         (e) => {
           if (e.webviewPanel.active && this.revealPath) {
-            void this.revealPath(resourcePath);
+            void this.revealPath(effectivePath);
           }
         },
         undefined,
@@ -402,7 +405,7 @@ export class WebviewPanelManager {
       (msg: WebviewMessage) => {
         if (gate.onHostMessage(msg)) { return; }
         if (msg.type === 'retry') {
-          void this.loadManifestListPanel(gate, key, resourcePath, handle, adapter);
+          void this.loadManifestListPanel(gate, key, effectivePath, handle, adapter);
         } else if (msg.type === 'openManifestFile') {
           void this.openManifestFilePanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
@@ -423,7 +426,7 @@ export class WebviewPanelManager {
 
     this.logger.info(`Panel opened: type=manifestList resource=${resourcePath}`);
 
-    await this.loadManifestListPanel(gate, key, resourcePath, handle, adapter);
+    await this.loadManifestListPanel(gate, key, effectivePath, handle, adapter);
   }
 
   private async loadManifestListPanel(
@@ -435,8 +438,9 @@ export class WebviewPanelManager {
   ): Promise<void> {
     gate.post({ type: 'setState', state: 'loading' });
 
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
     // Step 3: download to temp
-    const fetchResult = await adapter.fetchFileToTemp(handle, resourcePath);
+    const fetchResult = await adapter.fetchFileToTemp(handle, effectivePath);
     if (isStorageError(fetchResult)) {
       const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
       gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
@@ -477,8 +481,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
     if (this.revealPath) {
-      void this.revealPath(resourcePath);
+      void this.revealPath(effectivePath);
     }
     const key = panelRegistryKey(PanelType.ManifestFile, resourcePath);
     const existing = this.registry.get(key);
@@ -489,16 +494,16 @@ export class WebviewPanelManager {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=manifestFile resource=${resourcePath}`);
       if (existing.gate?.hasError()) {
-        void this.loadManifestFilePanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadManifestFilePanel(existing.gate, key, effectivePath, handle, adapter);
       } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
-        void this.loadManifestFilePanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadManifestFilePanel(existing.gate, key, effectivePath, handle, adapter);
       }
       return;
     }
 
-    const title = lastPathSegment(resourcePath);
+    const title = lastPathSegment(effectivePath);
     const nonce = generateNonce();
     const panel = vscode.window.createWebviewPanel(
       PanelType.ManifestFile,
@@ -523,7 +528,7 @@ export class WebviewPanelManager {
       panel.onDidChangeViewState(
         (e) => {
           if (e.webviewPanel.active && this.revealPath) {
-            void this.revealPath(resourcePath);
+            void this.revealPath(effectivePath);
           }
         },
         undefined,
@@ -535,7 +540,7 @@ export class WebviewPanelManager {
       (msg: WebviewMessage) => {
         if (gate.onHostMessage(msg)) { return; }
         if (msg.type === 'retry') {
-          void this.loadManifestFilePanel(gate, key, resourcePath, handle, adapter);
+          void this.loadManifestFilePanel(gate, key, effectivePath, handle, adapter);
         } else if (msg.type === 'openParquetPreview') {
           void this.openParquetPreviewPanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
@@ -556,7 +561,7 @@ export class WebviewPanelManager {
 
     this.logger.info(`Panel opened: type=manifestFile resource=${resourcePath}`);
 
-    await this.loadManifestFilePanel(gate, key, resourcePath, handle, adapter);
+    await this.loadManifestFilePanel(gate, key, effectivePath, handle, adapter);
   }
 
   private async loadManifestFilePanel(
@@ -568,7 +573,8 @@ export class WebviewPanelManager {
   ): Promise<void> {
     gate.post({ type: 'setState', state: 'loading' });
 
-    const fetchResult = await adapter.fetchFileToTemp(handle, resourcePath);
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
+    const fetchResult = await adapter.fetchFileToTemp(handle, effectivePath);
     if (isStorageError(fetchResult)) {
       const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
       gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
@@ -606,8 +612,9 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter: StorageAdapter = this.storageAdapter,
   ): Promise<void> {
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
     if (this.revealPath) {
-      void this.revealPath(resourcePath);
+      void this.revealPath(effectivePath);
     }
     const key = panelRegistryKey(PanelType.ParquetPreview, resourcePath);
     const existing = this.registry.get(key);
@@ -618,16 +625,16 @@ export class WebviewPanelManager {
       existing.panel.reveal(vscode.ViewColumn.One);
       this.logger.info(`Panel revealed (already open): type=parquetPreview resource=${resourcePath}`);
       if (existing.gate?.hasError()) {
-        void this.loadParquetPreviewPanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadParquetPreviewPanel(existing.gate, key, effectivePath, handle, adapter);
       } else if (existing.gate?.getTerminalMessage()) {
         existing.gate.repost();
       } else if (existing.gate) {
-        void this.loadParquetPreviewPanel(existing.gate, key, resourcePath, handle, adapter);
+        void this.loadParquetPreviewPanel(existing.gate, key, effectivePath, handle, adapter);
       }
       return;
     }
 
-    const title = lastPathSegment(resourcePath);
+    const title = lastPathSegment(effectivePath);
     const nonce = generateNonce();
     const panel = vscode.window.createWebviewPanel(
       PanelType.ParquetPreview,
@@ -652,7 +659,7 @@ export class WebviewPanelManager {
       panel.onDidChangeViewState(
         (e) => {
           if (e.webviewPanel.active && this.revealPath) {
-            void this.revealPath(resourcePath);
+            void this.revealPath(effectivePath);
           }
         },
         undefined,
@@ -664,7 +671,7 @@ export class WebviewPanelManager {
       (msg: WebviewMessage) => {
         if (gate.onHostMessage(msg)) { return; }
         if (msg.type === 'retry') {
-          void this.loadParquetPreviewPanel(gate, key, resourcePath, handle, adapter);
+          void this.loadParquetPreviewPanel(gate, key, effectivePath, handle, adapter);
         } else if (msg.type === 'openAdHocQuery') {
           void this.openAdHocQueryPanel(msg.resourcePath, handle, adapter);
         } else if (msg.type === 'breadcrumbNavigate') {
@@ -685,7 +692,7 @@ export class WebviewPanelManager {
 
     this.logger.info(`Panel opened: type=parquetPreview resource=${resourcePath}`);
 
-    await this.loadParquetPreviewPanel(gate, key, resourcePath, handle, adapter);
+    await this.loadParquetPreviewPanel(gate, key, effectivePath, handle, adapter);
   }
 
   private async loadParquetPreviewPanel(
@@ -697,7 +704,8 @@ export class WebviewPanelManager {
   ): Promise<void> {
     gate.post({ type: 'setState', state: 'loading' });
 
-    const fetchResult = await adapter.fetchFileToTemp(handle, resourcePath);
+    const effectivePath = globalLocationResolver.resolvePath(resourcePath, handle?.warehousePath);
+    const fetchResult = await adapter.fetchFileToTemp(handle, effectivePath);
     if (isStorageError(fetchResult)) {
       const msg = ERROR_MESSAGES[fetchResult.class] ?? ERROR_MESSAGES['internal'];
       gate.post({ type: 'setState', state: 'error', errorClass: fetchResult.class, message: msg });
@@ -910,7 +918,7 @@ export class WebviewPanelManager {
     for (let i = 0; i < parquetPathsToFetch.length; i += BATCH_SIZE) {
       const batch = parquetPathsToFetch.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(
-        batch.map((p) => adapter.fetchFileToTemp(handle, p)),
+        batch.map((p) => adapter.fetchFileToTemp(handle, globalLocationResolver.resolvePath(p, handle.warehousePath))),
       );
       for (let j = 0; j < batchResults.length; j++) {
         const fetchResult = batchResults[j];
@@ -1050,6 +1058,12 @@ export class WebviewPanelManager {
 
     const tableNameForQuery = lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_');
 
+    const location = metaObj['location'] ? String(metaObj['location']) : undefined;
+    if (location) {
+      globalLocationResolver.registerTable(effectivePath, location, handle.warehousePath);
+      globalLocationResolver.detectAndWarnMismatch(location, effectivePath, handle.warehousePath, tableNameForQuery);
+    }
+
     if (sql && columns.length > 0 && typeof (engine as any).validateQuery === 'function') {
       const valErr = await (engine as any).validateQuery(sql, columns, tableNameForQuery);
       if (isQueryError(valErr)) {
@@ -1067,7 +1081,8 @@ export class WebviewPanelManager {
     }
 
     // 4. Fetch manifest list Avro to temp
-    const manifestListPath = String(snapshot['manifest-list']);
+    const rawManifestListPath = String(snapshot['manifest-list']);
+    const manifestListPath = globalLocationResolver.resolvePath(rawManifestListPath, handle.warehousePath, effectivePath);
     const listTemp = await adapter.fetchFileToTemp(handle, manifestListPath);
     if (isStorageError(listTemp)) {
       return `Could not fetch manifest list (${manifestListPath}): ${listTemp.message}`;
@@ -1115,7 +1130,8 @@ export class WebviewPanelManager {
     let parsedActiveFilesCount = 0;
 
     for (const dm of dataManifests) {
-      const manifestTemp = await adapter.fetchFileToTemp(handle, dm.manifestPath);
+      const resolvedManifestPath = globalLocationResolver.resolvePath(dm.manifestPath, handle.warehousePath, effectivePath);
+      const manifestTemp = await adapter.fetchFileToTemp(handle, resolvedManifestPath);
       if (isStorageError(manifestTemp)) {
         continue;
       }
@@ -1183,7 +1199,7 @@ export class WebviewPanelManager {
     const isSampled = selectedFiles.length < totalCount;
 
     return {
-      parquetPaths: selectedFiles.map(f => f.filePath),
+      parquetPaths: selectedFiles.map(f => globalLocationResolver.resolvePath(f.filePath, handle.warehousePath, effectivePath)),
       tableName: lastPathSegment(effectivePath).replace(/[^a-zA-Z0-9_]/g, '_'),
       totalDataFiles: totalCount,
       accumulatedRecords,
@@ -1444,6 +1460,16 @@ export class WebviewPanelManager {
       return;
     }
 
+    if (result && typeof result === 'object') {
+      const metaObj = result as Record<string, any>;
+      const location = metaObj['location'] ? String(metaObj['location']) : undefined;
+      const tablePath = path.dirname(path.dirname(resourcePath));
+      if (location) {
+        globalLocationResolver.registerTable(tablePath, location, handle?.warehousePath);
+        globalLocationResolver.detectAndWarnMismatch(location, tablePath, handle?.warehousePath, path.basename(tablePath));
+      }
+    }
+
     post({
       type: 'loadMetadata',
       payload: result,
@@ -1597,10 +1623,8 @@ export class WebviewPanelManager {
       }
     }
 
-    if (endPartIndex < 0 || endPartIndex >= parts.length) { return; }
-
     const targetParts = parts.slice(0, endPartIndex + 1);
-    const targetPath = (handle?.connectionType === 'gcs')
+    let targetPath = (handle?.connectionType === 'gcs')
       ? 'gs://' + targetParts.join('/')
       : (handle?.connectionType === 's3')
       ? 's3://' + targetParts.join('/')
@@ -1611,6 +1635,19 @@ export class WebviewPanelManager {
       : isS3
       ? 's3://' + targetParts.join('/')
       : '/' + targetParts.join('/');
+
+    if (handle?.connectionType === 'local' && handle.warehousePath) {
+      const normWh = handle.warehousePath.replace(/\\/g, '/').replace(/\/$/, '');
+      if (!targetPath.startsWith(normWh)) {
+        if (segmentIndex === 0) {
+          targetPath = handle.warehousePath;
+        } else if (segmentIndex === 1 && breadcrumbs[1]) {
+          targetPath = path.join(handle.warehousePath, breadcrumbs[1]);
+        } else if (segmentIndex === 2 && breadcrumbs[1] && breadcrumbs[2]) {
+          targetPath = path.join(handle.warehousePath, breadcrumbs[1], breadcrumbs[2]);
+        }
+      }
+    }
 
     this.logger.info(`Breadcrumb navigate → resolved path: ${targetPath}`);
     if (this.revealPath) {
@@ -1671,27 +1708,28 @@ export class WebviewPanelManager {
     handle: ActiveConnectionHandle,
     adapter?: StorageAdapter,
   ): Promise<void> {
+    const effectiveTablePath = globalLocationResolver.resolvePath(tablePath, handle?.warehousePath);
     if (this.revealPath) {
-      void this.revealPath(tablePath);
+      void this.revealPath(effectiveTablePath);
     }
     const effectiveAdapter = adapter ?? this.storageAdapter;
-    const key = panelRegistryKey(PanelType.TableOverview, tablePath);
+    const key = panelRegistryKey(PanelType.TableOverview, effectiveTablePath);
     const existing = this.registry.get(key);
 
     if (existing) {
       existing.handle = handle;
       existing.adapter = effectiveAdapter;
       existing.panel.reveal(vscode.ViewColumn.One);
-      this.logger.info(`Panel revealed (already open): type=tableOverview resource=${tablePath}`);
+      this.logger.info(`Panel revealed (already open): type=tableOverview resource=${effectiveTablePath}`);
       if (existing.gate?.hasError()) {
-        await this.loadTableOverview(existing.gate, tablePath, handle, effectiveAdapter);
+        await this.loadTableOverview(existing.gate, effectiveTablePath, handle, effectiveAdapter);
       } else if (existing.gate) {
         existing.gate.repost();
       }
       return;
     }
 
-    const title = lastPathSegment(tablePath);
+    const title = lastPathSegment(effectiveTablePath);
     const panel = vscode.window.createWebviewPanel(
       PanelType.TableOverview,
       `${title} — Overview`,
@@ -1989,7 +2027,8 @@ export class WebviewPanelManager {
     adapter?: StorageAdapter,
     targetMetadataPath?: string,
   ): Promise<void> {
-    const cleanTablePath = tablePath.replace(/\/metadata\/?$/, '');
+    const resolvedTablePath = globalLocationResolver.resolvePath(tablePath.replace(/\/metadata\/?$/, ''), handle?.warehousePath);
+    const cleanTablePath = resolvedTablePath.replace(/\/metadata\/?$/, '');
     const metadataPath = `${cleanTablePath}/metadata`;
     if (this.revealPath) {
       void this.revealPath(metadataPath);
@@ -2168,6 +2207,8 @@ export class WebviewPanelManager {
     const formatVersion = Number(meta['format-version'] ?? 1);
     const tableUuid = String(meta['table-uuid'] ?? '');
     const location = String(meta['location'] ?? tablePath);
+    globalLocationResolver.registerTable(effectiveTablePath, location, handle.warehousePath);
+    globalLocationResolver.detectAndWarnMismatch(location, effectiveTablePath, handle.warehousePath, lastPathSegment(effectiveTablePath));
     const currentSnapshotId = meta['current-snapshot-id'] !== undefined ? String(meta['current-snapshot-id']) : null;
     const lastUpdatedMs = meta['last-updated-ms'] ? Number(meta['last-updated-ms']) : null;
     const properties: Record<string, string> = meta['properties'] ?? {};
@@ -2292,15 +2333,22 @@ export class WebviewPanelManager {
       return;
     }
 
+    const location = rawMeta['location'] ? String(rawMeta['location']) : undefined;
+    if (location) {
+      globalLocationResolver.registerTable(tablePath, location, handle.warehousePath);
+      globalLocationResolver.detectAndWarnMismatch(location, tablePath, handle.warehousePath, lastPathSegment(tablePath));
+    }
+
     const currentSnapshotId = rawMeta['current-snapshot-id'];
     const snapshots = Array.isArray(rawMeta['snapshots']) ? rawMeta['snapshots'] : [];
     const currentSnap = snapshots.find((s: any) => s['snapshot-id'] === currentSnapshotId) ?? snapshots[snapshots.length - 1];
-    const manifestListPath = currentSnap?.['manifest-list'];
-    if (!manifestListPath) {
+    const rawManifestListPath = currentSnap?.['manifest-list'];
+    if (!rawManifestListPath) {
       gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'No snapshots or manifests found.' });
       return;
     }
 
+    const manifestListPath = globalLocationResolver.resolvePath(rawManifestListPath, handle.warehousePath, tablePath);
     const listTemp = await adapter.fetchFileToTemp(handle, manifestListPath);
     if (isStorageError(listTemp)) {
       gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch manifest list.' });
@@ -2325,7 +2373,8 @@ export class WebviewPanelManager {
       return;
     }
 
-    const manifestTemp = await adapter.fetchFileToTemp(handle, dataManifest.manifestPath);
+    const resolvedManifestPath = globalLocationResolver.resolvePath(dataManifest.manifestPath, handle.warehousePath, tablePath);
+    const manifestTemp = await adapter.fetchFileToTemp(handle, resolvedManifestPath);
     if (isStorageError(manifestTemp)) {
       gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch manifest file.' });
       return;
@@ -2349,7 +2398,8 @@ export class WebviewPanelManager {
       return;
     }
 
-    const parquetTemp = await adapter.fetchFileToTemp(handle, sampleFile.filePath);
+    const resolvedParquetPath = globalLocationResolver.resolvePath(sampleFile.filePath, handle.warehousePath, tablePath);
+    const parquetTemp = await adapter.fetchFileToTemp(handle, resolvedParquetPath);
     if (isStorageError(parquetTemp)) {
       gate.post({ type: 'loadDataPreview', columns: [], rows: [], rowCount: 0, error: 'Could not fetch Parquet data file.' });
       return;
@@ -2587,6 +2637,12 @@ export class WebviewPanelManager {
     }
 
     const rawMeta = meta as Record<string, any>;
+    const location = rawMeta['location'] ? String(rawMeta['location']) : undefined;
+    if (location) {
+      globalLocationResolver.registerTable(effectiveTablePath, location, handle.warehousePath);
+      globalLocationResolver.detectAndWarnMismatch(location, effectiveTablePath, handle.warehousePath, lastPathSegment(effectiveTablePath));
+    }
+
     const rawSnaps = Array.isArray(rawMeta['snapshots']) ? rawMeta['snapshots'] : [];
     const snapshots: SnapshotSummaryItem[] = rawSnaps
       .slice()
@@ -2610,7 +2666,8 @@ export class WebviewPanelManager {
 
     if (activeSnapObj && activeSnapObj['manifest-list'] && this.queryEngine) {
       const mlPath = String(activeSnapObj['manifest-list']);
-      const mlTemp = await adapter.fetchFileToTemp(handle, mlPath);
+      const resolvedMlPath = globalLocationResolver.resolvePath(mlPath, handle.warehousePath, effectiveTablePath);
+      const mlTemp = await adapter.fetchFileToTemp(handle, resolvedMlPath);
       if (!isStorageError(mlTemp)) {
         try {
           const rows = await this.queryEngine.parseManifestList(mlTemp);
@@ -2676,7 +2733,8 @@ export class WebviewPanelManager {
       return;
     }
 
-    const manifestTemp = await adapter.fetchFileToTemp(handle, manifestPath);
+    const resolvedManifestPath = globalLocationResolver.resolvePath(manifestPath, handle.warehousePath);
+    const manifestTemp = await adapter.fetchFileToTemp(handle, resolvedManifestPath);
     if (isStorageError(manifestTemp)) {
       gate.post({ type: 'loadManifestDataFiles', manifestPath, files: [], error: 'Could not fetch manifest file.' });
       return;

@@ -25,6 +25,7 @@ import type {
 import { isIcebergDataFile } from './types.js';
 import { mapNodeError, storageError, type StorageError } from './errors.js';
 import type { ILogger } from '../extension.js';
+import { globalLocationResolver } from './locationResolver.js';
 
 export class LocalFsAdapter implements StorageAdapter {
   constructor(private readonly logger: ILogger) {}
@@ -74,10 +75,11 @@ export class LocalFsAdapter implements StorageAdapter {
     handle: ActiveConnectionHandle,
     tablePath: string,
   ): Promise<MetadataVersionEntry[] | StorageError> {
-    const guard = this.pathGuard(handle.warehousePath, tablePath);
+    const resolvedTable = this.resolveLocalPath(handle.warehousePath, tablePath);
+    const guard = this.pathGuard(handle.warehousePath, resolvedTable);
     if (guard) return guard;
 
-    const metaDir = path.join(tablePath, 'metadata');
+    const metaDir = path.join(resolvedTable, 'metadata');
     const metaDirGuard = this.pathGuard(handle.warehousePath, metaDir);
     if (metaDirGuard) return metaDirGuard;
 
@@ -111,19 +113,20 @@ export class LocalFsAdapter implements StorageAdapter {
     handle: ActiveConnectionHandle,
     filePath: string,
   ): Promise<unknown | StorageError> {
-    const guard = this.pathGuard(handle.warehousePath, filePath);
+    const resolvedPath = this.resolveLocalPath(handle.warehousePath, filePath);
+    const guard = this.pathGuard(handle.warehousePath, resolvedPath);
     if (guard) return guard;
 
-    this.logger.info(`Fetch started: path=${filePath} source=local`);
+    this.logger.info(`Fetch started: path=${resolvedPath} source=local`);
 
     try {
-      const buffer = await fs.readFile(filePath);
-      const isGzip = filePath.endsWith('.gz') || filePath.endsWith('.gz.metadata.json') || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
+      const buffer = await fs.readFile(resolvedPath);
+      const isGzip = resolvedPath.endsWith('.gz') || resolvedPath.endsWith('.gz.metadata.json') || (buffer.length >= 2 && buffer[0] === 0x1f && buffer[1] === 0x8b);
       const text = isGzip ? (await gunzipAsync(buffer)).toString('utf-8') : buffer.toString('utf-8');
       return JSON.parse(text);
     } catch (raw) {
       const err = mapNodeError(raw);
-      this.logger.error(`Fetch failed: path=${filePath} errorClass=${err.class}`);
+      this.logger.error(`Fetch failed: path=${resolvedPath} errorClass=${err.class}`);
       return err;
     }
   }
@@ -136,27 +139,28 @@ export class LocalFsAdapter implements StorageAdapter {
     handle: ActiveConnectionHandle,
     filePath: string,
   ): Promise<string | StorageError> {
-    const guard = this.pathGuard(handle.warehousePath, filePath);
+    const resolvedPath = this.resolveLocalPath(handle.warehousePath, filePath);
+    const guard = this.pathGuard(handle.warehousePath, resolvedPath);
     if (guard) return guard;
 
     // SL-V5: verify tmpdir is writable
     const tmpWritable = await checkTmpDirWritable();
     if (tmpWritable) return tmpWritable;
 
-    this.logger.info(`Fetch started: path=${filePath} source=local`);
+    this.logger.info(`Fetch started: path=${resolvedPath} source=local`);
 
     const uuid = crypto.randomUUID();
     const destDir = path.join(os.tmpdir(), 'iceberg-explorer', uuid);
-    const destFile = path.join(destDir, path.basename(filePath));
+    const destFile = path.join(destDir, path.basename(resolvedPath));
 
     try {
       await fs.mkdir(destDir, { recursive: true });
-      await fs.copyFile(filePath, destFile);
+      await fs.copyFile(resolvedPath, destFile);
       this.logger.info(`Temp file written: ${destFile}`);
       return destFile;
     } catch (raw) {
       const err = mapNodeError(raw);
-      this.logger.error(`Fetch failed: path=${filePath} errorClass=${err.class}`);
+      this.logger.error(`Fetch failed: path=${resolvedPath} errorClass=${err.class}`);
       return err;
     }
   }
@@ -170,12 +174,13 @@ export class LocalFsAdapter implements StorageAdapter {
     dirPath: string,
     options?: ListDirectoryOptions,
   ): Promise<DirectoryContentsResult | StorageError> {
-    const guard = this.pathGuard(handle.warehousePath, dirPath);
+    const resolvedDir = this.resolveLocalPath(handle.warehousePath, dirPath);
+    const guard = this.pathGuard(handle.warehousePath, resolvedDir);
     if (guard) return guard;
 
-    this.logger.info(`Listing directory: path=${dirPath} source=local`);
+    this.logger.info(`Listing directory: path=${resolvedDir} source=local`);
 
-    const resolvedPath = path.resolve(dirPath);
+    const resolvedPath = path.resolve(resolvedDir);
     const filterMode = options?.filter ?? 'iceberg-data';
 
     try {
@@ -222,7 +227,8 @@ export class LocalFsAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   async isTable(handle: ActiveConnectionHandle, dirPath: string): Promise<boolean | StorageError> {
-    const metaDir = path.join(dirPath, 'metadata');
+    const resolvedDir = this.resolveLocalPath(handle.warehousePath, dirPath);
+    const metaDir = path.join(resolvedDir, 'metadata');
     const guard = this.pathGuard(handle.warehousePath, metaDir);
     if (guard) return guard;
 
@@ -242,12 +248,25 @@ export class LocalFsAdapter implements StorageAdapter {
   // -------------------------------------------------------------------------
 
   /**
+   * Resolves a path that might be an S3/cloud URI (e.g. from copied metadata)
+   * to a local path under the warehouse using loose matching.
+   */
+  private resolveLocalPath(warehouseRoot: string, targetPath: string): string {
+    const resolved = globalLocationResolver.resolvePath(targetPath, warehouseRoot);
+    if (resolved !== targetPath) {
+      this.logger.info(`Resolved path via loose matching: original=${targetPath} resolved=${resolved}`);
+    }
+    return resolved;
+  }
+
+  /**
    * Path traversal guard (SL-V4).
    * Returns an access-denied StorageError if `targetPath` escapes `warehouseRoot`.
    */
   private pathGuard(warehouseRoot: string, targetPath: string): StorageError | undefined {
+    const resolved = this.resolveLocalPath(warehouseRoot, targetPath);
     const resolvedRoot = path.resolve(warehouseRoot);
-    const resolvedTarget = path.resolve(targetPath);
+    const resolvedTarget = path.resolve(resolved);
     if (!resolvedTarget.startsWith(resolvedRoot + path.sep) && resolvedTarget !== resolvedRoot) {
       return storageError(
         'access-denied',

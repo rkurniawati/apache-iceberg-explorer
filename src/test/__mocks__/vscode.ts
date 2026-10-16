@@ -133,6 +133,18 @@ export const window = {
   registerTreeDataProvider(_viewId: string, _provider: unknown) {
     return { dispose() {} };
   },
+
+  showWarningMessage(msg: string, ..._items: unknown[]) {
+    return Promise.resolve(undefined);
+  },
+
+  showInformationMessage(msg: string, ..._items: unknown[]) {
+    return Promise.resolve(undefined);
+  },
+
+  showErrorMessage(msg: string, ..._items: unknown[]) {
+    return Promise.resolve(undefined);
+  },
 };
 
 // ---------------------------------------------------------------------------

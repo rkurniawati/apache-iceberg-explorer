@@ -140,6 +140,7 @@
     "test:slice-new-panels": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts",
     "test:slice-gcs": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-gcs.test.ts",
     "test:slice-view": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-iceberg-view.test.ts",
+    "test:slice-location": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-location-resolver.test.ts",
     "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package --skip-license",
     "generate-icon": "inkscape resources/iceberg.svg -w 256 -h 256 -o resources/iceberg.png",
     "postcompile": "npm run copy-wasm"
