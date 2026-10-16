@@ -176,19 +176,6 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
   );
 
-  context.subscriptions.push(
-    vscode.commands.registerCommand('icebergExplorer.testPanel', () => {
-      // Use __dirname to resolve the fixture path relative to the compiled output (out/)
-      // The fixture lives at src/test/fixtures/ which is copied to out/test/fixtures/ on compile.
-      const fixturePath = context.extensionUri.fsPath
-        + '/src/test/fixtures/v2.metadata.json';
-      void panelManager.openMetadataDetailPanel(
-        fixturePath,
-        { connectionType: 'local', warehousePath: context.extensionUri.fsPath },
-      );
-    }),
-  );
-  
   // Register tree-related commands (openMetadataPanel, retryTreeNode, connectConnection, disconnectConnection, editConnection, deleteConnection)
   registerTreeCommands(
     context,

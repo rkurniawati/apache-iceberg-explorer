@@ -1,15 +1,29 @@
-src/
-# All node_modules are excluded. Runtime duckdb-wasm files are copied to out/ by the
-# copy-wasm script and resolved via extensionUri at runtime — no node_modules needed.
-node_modules/
-**/*.map
-**/*.test.ts
-**/*.test.js
-.github/
+# Source files and tests
+src/**
+test/**
+test-setup.ts
+tsconfig*.json
+.vscode/**
+.github/**
 .gitignore
-tsconfig.json
-.eslintrc*
+docs/**
+
+# Dependencies (bundled into out/extension.js by esbuild)
+node_modules/**
+
+# Build artifacts & typings
+**/*.map
+**/*.d.ts
+out/test/**
+out/connection/**
+out/panels/**
+out/query/**
+out/storage/**
+out/tree/**
+out/utils/**
+out/ecs/**
+
+# Markdown documentation (preserve README and CHANGELOG)
 *.md
-test/
-src/test/
-out/test/
+!README.md
+!CHANGELOG.md
