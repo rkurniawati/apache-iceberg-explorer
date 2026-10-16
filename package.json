@@ -4,7 +4,8 @@
   "description": "Browse Apache Iceberg warehouses in Google Cloud Storage, S3-compatible storage, or local file system from VS Code.",
   "icon": "resources/iceberg.png",
   "version": "0.0.1",
-  "publisher": "TBD",
+  "publisher": "RuthK",
+  "license": "Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/rkurniawati/apache-iceberg-explorer.git"
@@ -127,7 +128,9 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./",
+    "compile": "tsc -p ./ && npm run bundle",
+    "bundle": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
+    "bundle:prod": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap",
     "copy-wasm": "node -e \"const fs=require('fs'),path=require('path'),base=path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-node.cjs'));fs.mkdirSync('out',{recursive:true});['duckdb-eh.wasm','duckdb-mvp.wasm','duckdb-node.cjs','duckdb-node-eh.worker.cjs','duckdb-node-mvp.worker.cjs'].forEach(f=>fs.copyFileSync(path.join(base,f),'out/'+f));\"",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
@@ -141,7 +144,8 @@
     "test:slice-gcs": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-gcs.test.ts",
     "test:slice-view": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-iceberg-view.test.ts",
     "test:slice-location": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-location-resolver.test.ts",
-    "package": "npm run compile && npm run copy-wasm && npx @vscode/vsce package --skip-license",
+    "vscode:prepublish": "npm run compile && npm run bundle:prod",
+    "package": "npm run vscode:prepublish && npx @vscode/vsce package",
     "generate-icon": "inkscape resources/iceberg.svg -w 256 -h 256 -o resources/iceberg.png",
     "postcompile": "npm run copy-wasm"
   },
@@ -150,12 +154,13 @@
     "@duckdb/duckdb-wasm": "^1.29.0",
     "@google-cloud/storage": "^8.2.0",
     "avsc": "^5.7.7",
-    "pgsql-ast-parser": "^12.0.2",
-    "ts-node": "^10.9.2"
+    "pgsql-ast-parser": "^12.0.2"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.96.0",
+    "esbuild": "^0.28.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
 }
