@@ -176,10 +176,11 @@ function parseCliArgs() {
   const options = {
     versionArg: null,
     notes: null,
-    dryRun: false,
+    dryRun: process.env.npm_config_dry_run === 'true',
     noPush: false,
     noTest: false,
     allowDirty: false,
+    forceTag: false,
     yes: false,
     help: false,
   };
@@ -188,14 +189,16 @@ function parseCliArgs() {
     const arg = args[i];
     if (arg === '--help' || arg === '-h') {
       options.help = true;
-    } else if (arg === '--dry-run') {
+    } else if (arg === '--dry-run' || arg === '--dry' || arg === 'dry' || arg === 'preview') {
       options.dryRun = true;
-    } else if (arg === '--no-push') {
+    } else if (arg === '--no-push' || arg === 'no-push') {
       options.noPush = true;
-    } else if (arg === '--no-test') {
+    } else if (arg === '--no-test' || arg === 'no-test') {
       options.noTest = true;
     } else if (arg === '--allow-dirty') {
       options.allowDirty = true;
+    } else if (arg === '--force' || arg === '-f' || arg === '--force-tag') {
+      options.forceTag = true;
     } else if (arg === '-y' || arg === '--yes') {
       options.yes = true;
     } else if (arg === '--notes' || arg === '-m') {
@@ -333,11 +336,60 @@ async function main() {
   const tagName = `v${targetVersion}`;
   info(`Target Release: ${c.bold}${c.green}${tagName}${c.reset} (from v${currentVersion})`);
 
-  // Check if tag already exists
-  const existingTag = runSilent(`git rev-parse -q --verify "refs/tags/${tagName}"`);
-  if (existingTag) {
-    error(`Git tag "${tagName}" already exists locally.`);
-    process.exit(1);
+  // Check if tag already exists locally or remotely
+  let tagAction = 'create'; // 'create' | 'retag' | 'use-existing'
+  const existingLocalTag = runSilent(`git rev-parse -q --verify "refs/tags/${tagName}"`);
+  if (existingLocalTag) {
+    info(`Tag "${tagName}" exists locally. Checking remote origin...`);
+    const remoteTag = runSilent(`git ls-remote --tags origin refs/tags/${tagName}`);
+
+    if (remoteTag) {
+      error(`Git tag "${tagName}" already exists on remote origin (release already published).`);
+      const repoUrl = pkg.repository?.url?.replace(/\.git$/, '') || 'https://github.com/rkurniawati/apache-iceberg-explorer';
+      info(`View release at: ${repoUrl}/releases/tag/${tagName}`);
+      process.exit(1);
+    }
+
+    // Tag exists locally, but NOT on remote origin
+    const tagCommit = runSilent(`git rev-list -n 1 refs/tags/${tagName}`) || '';
+    const headCommit = runSilent('git rev-parse HEAD') || '';
+    const isAtHead = tagCommit === headCommit;
+
+    warn(`Tag "${tagName}" exists locally (${tagCommit.slice(0, 7)}) but has NOT been pushed to origin.`);
+
+    if (options.dryRun) {
+      if (!isAtHead) {
+        info(`Current HEAD is at ${headCommit.slice(0, 7)}. In a real run, tag will be moved to HEAD.`);
+      } else {
+        info(`Tag already points to current HEAD.`);
+      }
+    } else {
+      if (!isAtHead) {
+        info(`Current HEAD is ${headCommit.slice(0, 7)} (different from tag commit ${tagCommit.slice(0, 7)}).`);
+        if (isInteractive && !options.forceTag) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = (await rl.question(`Move tag "${tagName}" to current HEAD and push to origin? [Y/n]: `)).trim().toLowerCase();
+          rl.close();
+          if (answer === 'n' || answer === 'no') {
+            warn('Release cancelled by user.');
+            process.exit(0);
+          }
+        }
+        tagAction = 'retag';
+      } else {
+        info(`Tag already points to current HEAD.`);
+        if (isInteractive && !options.forceTag) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = (await rl.question(`Push unpushed tag "${tagName}" to origin now? [Y/n]: `)).trim().toLowerCase();
+          rl.close();
+          if (answer === 'n' || answer === 'no') {
+            warn('Release cancelled by user.');
+            process.exit(0);
+          }
+        }
+        tagAction = 'use-existing';
+      }
+    }
   }
 
   // 4. Update Changelog preview
@@ -427,10 +479,18 @@ async function main() {
     }
 
     // 10. Git tag
-    info(`Creating annotated git tag ${tagName}...`);
     const tagMsg = options.notes ? `Release ${tagName}: ${options.notes}` : `Release ${tagName}`;
-    run(`git tag -a ${tagName} -m "${tagMsg}"`);
-    success(`Created git tag ${tagName}`);
+    if (tagAction === 'retag') {
+      info(`Updating git tag ${tagName} to current HEAD...`);
+      run(`git tag -fa ${tagName} -m "${tagMsg}"`);
+      success(`Updated git tag ${tagName} to current HEAD`);
+    } else if (tagAction === 'use-existing') {
+      info(`Reusing existing local git tag ${tagName}...`);
+    } else {
+      info(`Creating annotated git tag ${tagName}...`);
+      run(`git tag -a ${tagName} -m "${tagMsg}"`);
+      success(`Created git tag ${tagName}`);
+    }
 
     // 11. Git push
     if (!options.noPush) {
