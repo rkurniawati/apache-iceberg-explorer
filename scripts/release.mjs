@@ -84,6 +84,9 @@ function parseSemver(versionStr) {
 }
 
 function bumpVersion(current, type) {
+  if (type.toLowerCase() === 'current') {
+    return current;
+  }
   const parsed = parseSemver(current);
   if (!parsed) throw new Error(`Invalid current version: ${current}`);
   switch (type.toLowerCase()) {
@@ -96,7 +99,7 @@ function bumpVersion(current, type) {
     default: {
       const explicit = parseSemver(type);
       if (!explicit) {
-        throw new Error(`Invalid version or bump type: "${type}". Expected patch, minor, major, or X.Y.Z`);
+        throw new Error(`Invalid version or bump type: "${type}". Expected current, patch, minor, major, or X.Y.Z`);
       }
       return explicit.raw;
     }
@@ -104,6 +107,14 @@ function bumpVersion(current, type) {
 }
 
 function updateChangelog(changelogContent, newVersion, releaseNotes, dateStr) {
+  // If this version is already documented in CHANGELOG.md, avoid duplicating it
+  const existingVersionRegex = new RegExp(`^##\\s+\\[${newVersion.replace(/\\./g, '\\.')}\\]`, 'm');
+  if (existingVersionRegex.test(changelogContent)) {
+    if (!releaseNotes || releaseNotes.trim().length === 0) {
+      return changelogContent;
+    }
+  }
+
   const unreleasedRegex = /^##\s+\[Unreleased\]\s*$/im;
   const versionHeaderRegex = /^##\s+\[(\d+\.\d+\.\d+)\]/m;
 
@@ -266,6 +277,7 @@ async function main() {
   // 3. Determine Target Version
   let targetVersion = null;
   const isInteractive = process.stdin.isTTY && !options.yes;
+  const currentTagExists = Boolean(runSilent(`git rev-parse -q --verify "refs/tags/v${currentVersion}"`));
 
   if (options.versionArg) {
     targetVersion = bumpVersion(currentVersion, options.versionArg);
@@ -277,21 +289,28 @@ async function main() {
       const majorV = bumpVersion(currentVersion, 'major');
 
       console.log(`\nSelect release type:`);
+      if (!currentTagExists) {
+        console.log(`  0) ${c.bold}current${c.reset} (${c.cyan}v${currentVersion}${c.reset}) ${c.dim}- initial release / untagged version${c.reset}`);
+      }
       console.log(`  1) ${c.bold}patch${c.reset} (${c.green}v${patchV}${c.reset})`);
       console.log(`  2) ${c.bold}minor${c.reset} (${c.yellow}v${minorV}${c.reset})`);
       console.log(`  3) ${c.bold}major${c.reset} (${c.red}v${majorV}${c.reset})`);
       console.log(`  4) custom version`);
 
-      const choice = (await rl.question(`\nEnter choice [1-4] (default: 1): `)).trim() || '1';
+      const defaultChoice = !currentTagExists ? '0' : '1';
+      const promptRange = !currentTagExists ? '0-4' : '1-4';
+      const choice = (await rl.question(`\nEnter choice [${promptRange}] (default: ${defaultChoice}): `)).trim() || defaultChoice;
 
-      if (choice === '1' || choice.toLowerCase() === 'patch') {
+      if ((choice === '0' || choice.toLowerCase() === 'current') && !currentTagExists) {
+        targetVersion = currentVersion;
+      } else if (choice === '1' || choice.toLowerCase() === 'patch') {
         targetVersion = patchV;
       } else if (choice === '2' || choice.toLowerCase() === 'minor') {
         targetVersion = minorV;
       } else if (choice === '3' || choice.toLowerCase() === 'major') {
         targetVersion = majorV;
       } else if (choice === '4' || choice.toLowerCase() === 'custom') {
-        const custom = await rl.question('Enter custom version (e.g. 0.1.0): ');
+        const custom = await rl.question('Enter custom version (e.g. 0.0.1 or 0.1.0): ');
         targetVersion = bumpVersion(currentVersion, custom.trim());
       } else {
         targetVersion = bumpVersion(currentVersion, choice);
@@ -377,21 +396,35 @@ async function main() {
   let modifiedFiles = false;
   try {
     // 7. Update package.json and package-lock.json
-    info('\nUpdating package.json & package-lock.json...');
-    run(`npm version ${targetVersion} --no-git-tag-version`);
-    modifiedFiles = true;
-    success(`Updated package version to ${targetVersion}`);
+    if (targetVersion !== currentVersion) {
+      info('\nUpdating package.json & package-lock.json...');
+      run(`npm version ${targetVersion} --no-git-tag-version --allow-same-version`);
+      modifiedFiles = true;
+      success(`Updated package version to ${targetVersion}`);
+    } else {
+      info(`\nVersion is already at ${targetVersion}.`);
+    }
 
     // 8. Update CHANGELOG.md
-    info('Updating CHANGELOG.md...');
-    fs.writeFileSync(CHANGELOG_PATH, updatedChangelog, 'utf-8');
-    success(`Updated CHANGELOG.md with ${tagName} entry`);
+    if (updatedChangelog !== changelogContent) {
+      info('Updating CHANGELOG.md...');
+      fs.writeFileSync(CHANGELOG_PATH, updatedChangelog, 'utf-8');
+      modifiedFiles = true;
+      success(`Updated CHANGELOG.md with ${tagName} entry`);
+    } else {
+      info(`CHANGELOG.md is already up to date for ${tagName}.`);
+    }
 
     // 9. Git commit
-    info('Committing release files...');
-    run('git add package.json package-lock.json CHANGELOG.md');
-    run(`git commit -m "chore(release): ${tagName}"`);
-    success(`Committed release changes with message "chore(release): ${tagName}"`);
+    const hasChanges = Boolean(runSilent('git status --porcelain package.json package-lock.json CHANGELOG.md'));
+    if (hasChanges) {
+      info('Committing release files...');
+      run('git add package.json package-lock.json CHANGELOG.md');
+      run(`git commit -m "chore(release): ${tagName}"`);
+      success(`Committed release changes with message "chore(release): ${tagName}"`);
+    } else {
+      info('No file changes to commit (working tree already aligned).');
+    }
 
     // 10. Git tag
     info(`Creating annotated git tag ${tagName}...`);
@@ -426,6 +459,10 @@ async function main() {
 }
 
 main().catch(err => {
+  if (err.name === 'AbortError' || err.message?.includes('Ctrl+C') || err.message?.includes('SIGINT')) {
+    log(`\n${c.yellow}Release cancelled.${c.reset}\n`);
+    process.exit(0);
+  }
   error(`Unhandled error: ${err.message}`);
   process.exit(1);
 });
