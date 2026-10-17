@@ -155,11 +155,11 @@ Using DuckDB-WASM allows the extension to query Parquet files without requiring 
 
 ### Execution Details (`src/query/queryEngine.ts`)
 
-1. **Pre-packaging Binaries (`package.json`)**:
-   During build, DuckDB files are copied to the `out/` directory:
-   - `duckdb-eh.wasm` / `duckdb-mvp.wasm` (Compiled WASM binaries)
-   - `duckdb-node.cjs` (Node-compatible worker runner)
-   - `duckdb-node-eh.worker.cjs` (Worker thread entry)
+1. **Pre-packaging Binaries and Worker Scripts (`package.json`)**:
+   During build (`npm run copy-wasm` via `scripts/bundle-duckdb.mjs`), DuckDB assets are prepared in the `out/` directory:
+   - `duckdb-eh.wasm` / `duckdb-mvp.wasm` (Compiled WASM binaries, copied directly)
+   - `duckdb-node.cjs` (Node-compatible worker runner, bundled with `apache-arrow` inlined)
+   - `duckdb-node-eh.worker.cjs` / `duckdb-node-mvp.worker.cjs` (Worker thread entry, bundled with `apache-arrow` inlined)
 
 2. **Isolation via `node:worker_threads`**:
    To prevent SQL execution from blocking Node's main event loop (which would freeze the VS Code UI), DuckDB is spawned in a separate worker thread:

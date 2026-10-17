@@ -142,8 +142,8 @@
   "scripts": {
     "compile": "tsc -p ./ && npm run bundle",
     "bundle": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
-    "bundle:prod": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap",
-    "copy-wasm": "node -e \"const fs=require('fs'),path=require('path'),base=path.dirname(require.resolve('@duckdb/duckdb-wasm/dist/duckdb-node.cjs'));fs.mkdirSync('out',{recursive:true});['duckdb-eh.wasm','duckdb-mvp.wasm','duckdb-node.cjs','duckdb-node-eh.worker.cjs','duckdb-node-mvp.worker.cjs'].forEach(f=>fs.copyFileSync(path.join(base,f),'out/'+f));\"",
+    "bundle:prod": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap && node scripts/bundle-duckdb.mjs --minify",
+    "copy-wasm": "node scripts/bundle-duckdb.mjs",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
     "test": "npm run test:slice && npm run test:slice-settings && npm run test:slice-query && npm run test:slice-tree && npm run test:slice-panels && npm run test:slice-new-panels && npm run test:slice-gcs && npm run test:slice-view && npm run test:slice-location",
@@ -173,6 +173,7 @@
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.96.0",
     "@vscode/vsce": "^4.0.0",
+    "apache-arrow": "^17.0.0",
     "esbuild": "^0.28.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"

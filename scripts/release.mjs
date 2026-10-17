@@ -338,18 +338,40 @@ async function main() {
 
   // Check if tag already exists locally or remotely
   let tagAction = 'create'; // 'create' | 'retag' | 'use-existing'
+  let needsForcePush = false;
   const existingLocalTag = runSilent(`git rev-parse -q --verify "refs/tags/${tagName}"`);
-  if (existingLocalTag) {
-    info(`Tag "${tagName}" exists locally. Checking remote origin...`);
-    const remoteTag = runSilent(`git ls-remote --tags origin refs/tags/${tagName}`);
+  const remoteTag = runSilent(`git ls-remote --tags origin refs/tags/${tagName}`);
 
-    if (remoteTag) {
-      error(`Git tag "${tagName}" already exists on remote origin (release already published).`);
-      const repoUrl = pkg.repository?.url?.replace(/\.git$/, '') || 'https://github.com/rkurniawati/apache-iceberg-explorer';
-      info(`View release at: ${repoUrl}/releases/tag/${tagName}`);
-      process.exit(1);
+  if (remoteTag) {
+    const repoUrl = pkg.repository?.url?.replace(/\.git$/, '') || 'https://github.com/rkurniawati/apache-iceberg-explorer';
+    warn(`Git tag "${tagName}" already exists on remote origin.`);
+    info(`Existing release: ${repoUrl}/releases/tag/${tagName}`);
+
+    if (options.dryRun) {
+      warn(`[DRY RUN] Force re-release would overwrite tag "${tagName}" on remote.`);
+      tagAction = 'retag';
+      needsForcePush = true;
+    } else {
+      if (!options.forceTag) {
+        if (isInteractive) {
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = (await rl.question(`Do you want to FORCE re-release and overwrite tag "${tagName}" on GitHub? [y/N]: `)).trim().toLowerCase();
+          rl.close();
+          if (answer !== 'y' && answer !== 'yes') {
+            log(`\n${c.yellow}Release cancelled.${c.reset} To create a new release instead, run: ${c.green}npm run release patch${c.reset}\n`);
+            process.exit(0);
+          }
+        } else {
+          error(`Tag "${tagName}" already exists on remote. Use --force to overwrite.`);
+          process.exit(1);
+        }
+      }
+
+      warn(`Force re-release approved: "${tagName}" will be moved to current HEAD and force-pushed.`);
+      tagAction = 'retag';
+      needsForcePush = true;
     }
-
+  } else if (existingLocalTag) {
     // Tag exists locally, but NOT on remote origin
     const tagCommit = runSilent(`git rev-list -n 1 refs/tags/${tagName}`) || '';
     const headCommit = runSilent('git rev-parse HEAD') || '';
@@ -496,7 +518,7 @@ async function main() {
     if (!options.noPush) {
       info(`Pushing commit and tag to origin...`);
       run(`git push origin ${currentBranch}`);
-      run(`git push origin ${tagName}`);
+      run(`git push origin ${tagName}${needsForcePush ? ' --force' : ''}`);
       success(`Pushed branch ${currentBranch} and tag ${tagName} to origin`);
 
       const repoUrl = pkg.repository?.url?.replace(/\.git$/, '') || 'https://github.com/rkurniawati/apache-iceberg-explorer';
