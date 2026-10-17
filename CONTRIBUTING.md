@@ -93,6 +93,39 @@ Or: `Cmd+Shift+P` → **Extensions: Show Installed Extensions** → find Iceberg
 
 ---
 
+## Releasing via GitHub Actions
+
+Releases are automated using GitHub Actions (`.github/workflows/release.yml`):
+
+1. **Automated Release Cutting (Recommended)**:
+   Use the built-in release script to bump versions, update changelog, run tests, commit, tag, and push:
+   ```bash
+   # Interactive prompt (select patch, minor, major, or custom)
+   npm run release
+
+   # Or specify version and optional notes directly
+   npm run release patch
+   npm run release minor -m "Support Iceberg v3 metadata format"
+   npm run release 0.2.0
+
+   # Preview changes without modifying files or git
+   npm run release patch --dry-run
+   ```
+   Pushing the tag triggers the GitHub Action to build and package the `.vsix` and publish the GitHub Release with the `.vsix` attached.
+
+2. **Manual tag-triggered release**:
+   ```bash
+   git tag v0.0.1
+   git push origin v0.0.1
+   ```
+
+3. **Manual release dispatch**:
+   - Navigate to **Actions** → **Release** in your GitHub repository.
+   - Click **Run workflow** and optionally configure draft / prerelease toggles.
+   - The workflow also saves the `.vsix` as a downloadable artifact in the workflow run summary.
+
+---
+
 ## Project structure
 
 ```
@@ -131,6 +164,7 @@ iceberg-explorer/
 | `npm run compile` | One-shot TypeScript compile to `out/` |
 | `npm run watch` | Watch mode — recompiles on every save |
 | `npm run package` | Produce `.vsix` via `vsce package` |
+| `npm run release` | Automated release cutter (updates package.json, changelog, commits, tags, and pushes) |
 
 ---
 

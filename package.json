@@ -157,7 +157,8 @@
     "test:slice-view": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-iceberg-view.test.ts",
     "test:slice-location": "npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-location-resolver.test.ts",
     "vscode:prepublish": "npm run compile && npm run bundle:prod",
-    "package": "npm run vscode:prepublish && npx @vscode/vsce package",
+    "package": "vsce package",
+    "release": "node scripts/release.mjs",
     "generate-icon": "inkscape resources/iceberg.svg -w 256 -h 256 -o resources/iceberg.png",
     "postcompile": "npm run copy-wasm"
   },
@@ -171,6 +172,7 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
