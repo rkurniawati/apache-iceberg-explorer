@@ -68,7 +68,7 @@ All commands can be triggered via the VS Code Command Palette (`Cmd+Shift+P` / `
 ## System Requirements
 
 * **VS Code**: Version `1.96.0` or later
-* **Platform**: macOS arm64 (Apple Silicon) *(MVP architecture)*
+* **Platform**: Cross-platform (macOS, Linux, Windows)
 
 ---
 
@@ -80,4 +80,5 @@ Looking to build from source, run tests, or contribute to the extension? See [CO
 
 ## License
 
-Refer to the project repository for license details.
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+

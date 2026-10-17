@@ -2,8 +2,6 @@
 
 Browse Apache Iceberg warehouses stored in Google Cloud Storage (GCS), S3-compatible object storage, or on the local file system, directly from VS Code.
 
-> **MVP platform:** macOS arm64 only. The extension will not activate on other architectures.
-
 ---
 
 ## Prerequisites
@@ -60,22 +58,15 @@ The settings webview and tree view are implemented in a later slice. The Connect
 
 Use this to install the extension permanently into your VS Code.
 
-**Step 1.** Install the VS Code Extension CLI tool:
+**Step 1.** Compile and package:
 
 ```bash
-npm install -g @vscode/vsce
-```
-
-**Step 2.** Compile and package:
-
-```bash
-npm run compile
-vsce package --allow-missing-repository
+npm run package
 ```
 
 This produces `iceberg-explorer-0.0.1.vsix` in the current directory.
 
-**Step 3.** Install:
+**Step 2.** Install:
 
 ```bash
 code --install-extension iceberg-explorer-0.0.1.vsix
@@ -83,7 +74,7 @@ code --install-extension iceberg-explorer-0.0.1.vsix
 
 Or from inside VS Code: `Cmd+Shift+P` → **Extensions: Install from VSIX…** → select the `.vsix` file.
 
-**Step 4.** Reload VS Code:
+**Step 3.** Reload VS Code:
 
 ```bash
 # Command palette
@@ -95,7 +86,7 @@ Cmd+Shift+P → Developer: Reload Window
 ## Uninstall
 
 ```bash
-code --uninstall-extension TBD.iceberg-explorer
+code --uninstall-extension RuthK.iceberg-explorer
 ```
 
 Or: `Cmd+Shift+P` → **Extensions: Show Installed Extensions** → find Iceberg Explorer → **Uninstall**.
