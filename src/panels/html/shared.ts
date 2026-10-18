@@ -51,9 +51,10 @@ export function breadcrumbHtml(resourcePath: string): string {
 export const BREADCRUMB_CSS = `
     #breadcrumb {
       display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem;
-      padding: 0.5rem 0; border-bottom: 1px solid var(--vscode-editorWidget-border);
-      margin-bottom: 0.75rem; font-size: 0.9em;
+      padding: 0 0 0.5rem; border-bottom: 1px solid var(--vscode-editorWidget-border);
+      margin-bottom: 1rem; font-size: 0.9em;
     }
+    #breadcrumb:empty { display: none; }
     .breadcrumb-sep { opacity: 0.5; }
     .breadcrumb-link {
       color: var(--vscode-textLink-foreground); cursor: pointer; text-decoration: underline;

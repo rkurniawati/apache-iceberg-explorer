@@ -48,7 +48,7 @@ export function getSettingsHtml(
   <link rel="stylesheet" href="${commonCssHref}">
   <link rel="stylesheet" href="${panelCssHref}">
 </head>
-<body>
+<body class="settings-body">
 
 <h1>Iceberg Explorer — Connection Settings</h1>
 
