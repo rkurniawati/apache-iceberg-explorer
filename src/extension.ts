@@ -113,6 +113,14 @@ export function activate(context: vscode.ExtensionContext): void {
     () => connectionManager.listConnections(),
   );
 
+  // Keep settings panel connect/disconnect state in sync with tree provider
+  context.subscriptions.push(
+    treeProvider.onDidChangeTreeData(() => {
+      const activeId = treeProvider.getActiveConnectionId();
+      panelManager.notifyActiveConnectionChanged(activeId);
+    }),
+  );
+
   // Register the settings command (FR-1, AC-1).
   // Accepts an optional editId to pre-populate the form for editing.
   context.subscriptions.push(
@@ -187,6 +195,14 @@ export function activate(context: vscode.ExtensionContext): void {
           const pathHandle = buildHandleForPath(handle, targetPath);
           return findCandidateWarehouseRoots(pathHandle, adapter);
         },
+        async (id) => {
+          const activeId = treeProvider.getActiveConnectionId();
+          if (!id || id === activeId) {
+            treeProvider.setActiveConnectionId(null);
+            treeProvider.setActiveConnection(null);
+          }
+        },
+        () => treeProvider.getActiveConnectionId(),
       );
     }),
   );

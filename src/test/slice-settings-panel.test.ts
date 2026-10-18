@@ -1349,6 +1349,232 @@ void (async () => {
     assert.strictEqual((result as any).suggestedWarehousePath, 's3://rk-iceberg/dogs');
   });
 
+  // ── Tests for Connect / Disconnect button behavior in settings panel ───────
+
+  await run('WebviewPanelManager.openSettingsPanel handles disconnectConnection message and posts disconnectSuccess', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      let disconnectedId: string | undefined;
+      const disconnectCallback = async (id?: string) => {
+        disconnectedId = id;
+      };
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(
+        undefined,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        disconnectCallback,
+        () => 'conn-active',
+      );
+
+      await fireMessage({ type: 'disconnectConnection', id: 'conn-active' });
+
+      assert.strictEqual(disconnectedId, 'conn-active', 'disconnect callback should be called with connection id');
+      const msgs = getMessages();
+      const discMsg = msgs.find((m) => m.type === 'disconnectSuccess');
+      assert.ok(discMsg, 'expected disconnectSuccess in messages');
+      assert.strictEqual(discMsg!.id, 'conn-active');
+    });
+  });
+
+  await run('WebviewPanelManager.openSettingsPanel sends editConnection with isActive=true and activeConnectionId for active connection', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const activeConfig: ConnectionConfig = {
+        id: 'conn-active',
+        label: 'Active Conn',
+        connectionType: 'local',
+        warehousePath: '/tmp/active',
+        sslVerification: true,
+        savedAt: Date.now(),
+      };
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(
+        activeConfig,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        () => [activeConfig],
+        async () => true,
+        undefined,
+        undefined,
+        async () => {},
+        () => 'conn-active',
+      );
+
+      const msgs = getMessages();
+      const editMsg = msgs.find((m) => m.type === 'editConnection');
+      assert.ok(editMsg, 'expected editConnection message');
+      assert.strictEqual(editMsg!.isActive, true, 'isActive should be true');
+      assert.strictEqual(editMsg!.activeConnectionId, 'conn-active', 'activeConnectionId should match');
+    });
+  });
+
+  await run('WebviewPanelManager.notifyActiveConnectionChanged sends setActiveConnectionId to settings panel', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(
+        undefined,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+      );
+
+      mgr.notifyActiveConnectionChanged('conn-switched');
+      const msgs = getMessages();
+      const changeMsg = msgs.find((m) => m.type === 'setActiveConnectionId');
+      assert.ok(changeMsg, 'expected setActiveConnectionId in messages');
+      assert.strictEqual(changeMsg!.id, 'conn-switched');
+    });
+  });
+
+  await run('Settings panel client script changes "Connect" button to "Disconnect" if connection shown is open', async () => {
+    const { getSettingsHtml } = await import('../panels/html/settings.js');
+    const html = getSettingsHtml(
+      'test-nonce',
+      'vscode-resource:',
+      [{ id: 'conn-open', label: 'Open Connection' }, { id: 'conn-other', label: 'Other Connection' }],
+      undefined,
+      'conn-open',
+    );
+    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+    assert.strictEqual(scriptMatches.length, 1);
+
+    const listeners: Record<string, Record<string, Function[]>> = {};
+    const elements: Record<string, any> = {};
+    const mockElement = (id = '') => ({
+      id,
+      value: '',
+      textContent: '',
+      title: '',
+      style: {},
+      classList: { add() {}, remove() {} },
+      addEventListener(evt: string, fn: Function) {
+        listeners[id] = listeners[id] || {};
+        listeners[id][evt] = listeners[id][evt] || [];
+        listeners[id][evt].push(fn);
+      },
+      querySelectorAll() { return []; },
+      scrollIntoView() {},
+      appendChild(child: any) { return child; },
+      dataset: {},
+      disabled: false,
+      focus() {},
+    });
+
+    const mockDocument = {
+      getElementById(id: string) {
+        if (!elements[id]) {
+          elements[id] = mockElement(id);
+        }
+        return elements[id];
+      },
+      querySelectorAll() { return []; },
+      createElement(tag: string) { return mockElement(tag); },
+      createTextNode(text: string) { return { textContent: text }; },
+    };
+    const windowListeners: Record<string, Function[]> = {};
+    const mockWindow = {
+      addEventListener(evt: string, fn: Function) {
+        windowListeners[evt] = windowListeners[evt] || [];
+        windowListeners[evt].push(fn);
+      },
+    };
+    const postedMessages: any[] = [];
+    const mockVsCode = () => ({
+      postMessage(msg: any) { postedMessages.push(msg); },
+    });
+
+    const fn = new Function('acquireVsCodeApi', 'document', 'window', scriptMatches[0][1]);
+    fn(mockVsCode, mockDocument, mockWindow);
+
+    const messageHandlers = windowListeners['message'] || [];
+    assert.ok(messageHandlers.length > 0, 'message handler should be registered');
+    const dispatchMessage = (data: any) => {
+      for (const h of messageHandlers) {
+        h({ data });
+      }
+    };
+
+    const connectBtn = elements['connect-btn'];
+    assert.ok(connectBtn, 'connect-btn should exist');
+
+    // 1. Edit a non-open connection (conn-other) -> button should say "Connect"
+    dispatchMessage({
+      type: 'editConnection',
+      config: {
+        id: 'conn-other',
+        label: 'Other Connection',
+        connectionType: 'local',
+        warehousePath: '/path/to/other',
+      },
+      isActive: false,
+      activeConnectionId: 'conn-open',
+    });
+    assert.strictEqual(connectBtn.textContent, 'Connect', 'connect-btn should say "Connect" for non-open connection');
+
+    // Click "Connect" -> should post activateConnection
+    const connectClicks = listeners['connect-btn']?.['click'] || [];
+    assert.ok(connectClicks.length > 0, 'click listener should be attached to connect-btn');
+    postedMessages.length = 0;
+    connectClicks[0]();
+    assert.strictEqual(postedMessages.length, 1);
+    assert.strictEqual(postedMessages[0].type, 'activateConnection');
+    assert.strictEqual(postedMessages[0].id, 'conn-other');
+
+    // 2. Edit the open connection (conn-open) -> button should say "Disconnect"
+    dispatchMessage({
+      type: 'editConnection',
+      config: {
+        id: 'conn-open',
+        label: 'Open Connection',
+        connectionType: 'local',
+        warehousePath: '/path/to/open',
+      },
+      isActive: true,
+      activeConnectionId: 'conn-open',
+    });
+    assert.strictEqual(connectBtn.textContent, 'Disconnect', 'connect-btn should say "Disconnect" for open connection');
+
+    // Click "Disconnect" -> should post disconnectConnection
+    postedMessages.length = 0;
+    connectClicks[0]();
+    assert.strictEqual(postedMessages.length, 1);
+    assert.strictEqual(postedMessages[0].type, 'disconnectConnection');
+    assert.strictEqual(postedMessages[0].id, 'conn-open');
+
+    // 3. Receive disconnectSuccess -> button should change back to "Connect"
+    dispatchMessage({
+      type: 'disconnectSuccess',
+      id: 'conn-open',
+    });
+    assert.strictEqual(connectBtn.textContent, 'Connect', 'connect-btn should change back to "Connect" after disconnect');
+
+    // 4. Receive activateSuccess -> button should change to "Disconnect"
+    dispatchMessage({
+      type: 'activateSuccess',
+      id: 'conn-open',
+    });
+    assert.strictEqual(connectBtn.textContent, 'Disconnect', 'connect-btn should change to "Disconnect" after activation');
+
+    // 5. Receive setActiveConnectionId(null) -> button should change to "Connect"
+    dispatchMessage({
+      type: 'setActiveConnectionId',
+      id: null,
+    });
+    assert.strictEqual(connectBtn.textContent, 'Connect', 'connect-btn should change to "Connect" when active connection becomes null');
+
+    // 6. Receive setActiveConnectionId('conn-open') -> button should change to "Disconnect"
+    dispatchMessage({
+      type: 'setActiveConnectionId',
+      id: 'conn-open',
+    });
+    assert.strictEqual(connectBtn.textContent, 'Disconnect', 'connect-btn should change to "Disconnect" when this connection becomes active');
+  });
+
   // ── Summary ───────────────────────────────────────────────────────────────
 
   console.log(`\n${passed + failed} tests: ${passed} passed, ${failed} failed`);

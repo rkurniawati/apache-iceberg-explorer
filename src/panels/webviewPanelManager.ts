@@ -1236,9 +1236,13 @@ export class WebviewPanelManager {
       creds: { accessKey: string; secretKey: string },
       searchPath?: string,
     ) => Promise<string[] | StorageError | Error>,
+    disconnectConnection?: (id?: string) => Promise<void>,
+    getActiveConnectionId?: () => string | null | undefined,
   ): Promise<void> {
     const key = panelRegistryKey(PanelType.Settings, 'settings');
     const existing = this.registry.get(key);
+
+    const currentActiveId = getActiveConnectionId ? getActiveConnectionId() : undefined;
 
     if (existing) {
       existing.panel.reveal(vscode.ViewColumn.One);
@@ -1253,6 +1257,7 @@ export class WebviewPanelManager {
       // If an editConfig was provided, post the editConnection message to pre-fill
       if (editConfig) {
         const hasSavedCredentials = (editConfig.connectionType === 's3' || (editConfig.connectionType === 'gcs' && editConfig.gcsAuthType === 'serviceAccountKey')) && (hasCredential ? await hasCredential(editConfig.id) : true);
+        const isActive = currentActiveId !== undefined ? currentActiveId === editConfig.id : false;
         void existing.panel.webview.postMessage({
           type: 'editConnection',
           config: {
@@ -1267,10 +1272,13 @@ export class WebviewPanelManager {
             projectId: editConfig.projectId,
           },
           hasSavedCredentials,
+          isActive,
+          activeConnectionId: currentActiveId ?? null,
         });
       } else {
         void existing.panel.webview.postMessage({
           type: 'newConnection',
+          activeConnectionId: currentActiveId ?? null,
         });
       }
       return;
@@ -1293,7 +1301,7 @@ export class WebviewPanelManager {
     panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns, {
       commonCssUri,
       panelCssUri,
-    });
+    }, currentActiveId ?? null);
 
     // Cast to PanelRecord — settings panels carry no resourcePath or handle;
     // use sentinel values to satisfy the interface without widening the type.
@@ -1344,11 +1352,13 @@ export class WebviewPanelManager {
               const savedId = await saveConnection(config, creds);
               const effectiveId = (typeof savedId === 'string' && savedId) ? savedId : config.id;
               const currentConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : undefined;
+              const currentActiveId = getActiveConnectionId ? getActiveConnectionId() : undefined;
               void panel.webview.postMessage({
                 type: 'saveSuccess',
                 connections: currentConns,
                 connectionId: effectiveId,
                 label: config.label,
+                activeConnectionId: currentActiveId ?? null,
               });
               const toastMessage = isEdit
                 ? `Changes to "${config.label}" saved.`
@@ -1359,9 +1369,9 @@ export class WebviewPanelManager {
                   if (action === 'Connect' && activateConnection) {
                     const result = await activateConnection(effectiveId);
                     if (isStorageError(result)) {
-                      void panel.webview.postMessage({ type: 'activateError', message: result.message });
+                      void panel.webview.postMessage({ type: 'activateError', message: result.message, id: effectiveId });
                     } else {
-                      void panel.webview.postMessage({ type: 'activateSuccess' });
+                      void panel.webview.postMessage({ type: 'activateSuccess', id: effectiveId });
                     }
                   }
                 });
@@ -1380,11 +1390,29 @@ export class WebviewPanelManager {
           case 'activateConnection': {
             // NFR-7: do not log the id (design.md §2.8.3)
             this.logger.info('Settings panel: activateConnection');
-            const result = await activateConnection(String(msg.id ?? ''));
+            const targetId = String(msg.id ?? '');
+            const result = await activateConnection(targetId);
             if (isStorageError(result)) {
-              void panel.webview.postMessage({ type: 'activateError', message: result.message });
+              void panel.webview.postMessage({ type: 'activateError', message: result.message, id: targetId });
             } else {
-              void panel.webview.postMessage({ type: 'activateSuccess' });
+              void panel.webview.postMessage({ type: 'activateSuccess', id: targetId });
+            }
+            break;
+          }
+
+          case 'disconnectConnection': {
+            this.logger.info('Settings panel: disconnectConnection');
+            const targetId = String(msg.id ?? '');
+            try {
+              if (disconnectConnection) {
+                await disconnectConnection(targetId);
+              } else {
+                await vscode.commands.executeCommand('icebergExplorer.disconnectConnection', targetId);
+              }
+              void panel.webview.postMessage({ type: 'disconnectSuccess', id: targetId });
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : 'Failed to disconnect connection.';
+              void panel.webview.postMessage({ type: 'disconnectError', message, id: targetId });
             }
             break;
           }
@@ -1556,6 +1584,7 @@ export class WebviewPanelManager {
     // If an editConfig was provided, post the editConnection message to pre-fill the form.
     if (editConfig) {
       const hasSavedCredentials = (editConfig.connectionType === 's3' || (editConfig.connectionType === 'gcs' && editConfig.gcsAuthType === 'serviceAccountKey')) && (hasCredential ? await hasCredential(editConfig.id) : true);
+      const isActive = currentActiveId !== undefined ? currentActiveId === editConfig.id : false;
       void panel.webview.postMessage({
         type: 'editConnection',
         config: {
@@ -1570,10 +1599,26 @@ export class WebviewPanelManager {
           projectId: editConfig.projectId,
         },
         hasSavedCredentials,
+        isActive,
+        activeConnectionId: currentActiveId ?? null,
       });
     }
 
     this.logger.info('Panel opened: type=settings resource=settings');
+  }
+
+  /**
+   * Notifies the open settings panel (if any) of an active connection change.
+   */
+  notifyActiveConnectionChanged(activeId: string | null): void {
+    const key = panelRegistryKey(PanelType.Settings, 'settings');
+    const existing = this.registry.get(key);
+    if (existing) {
+      void existing.panel.webview.postMessage({
+        type: 'setActiveConnectionId',
+        id: activeId,
+      });
+    }
   }
 
   // ── Internal methods ────────────────────────────────────────────────────────

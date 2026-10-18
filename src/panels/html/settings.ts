@@ -32,6 +32,7 @@ export function getSettingsHtml(
   cspSource: string,
   initialConnections: Array<{ id: string; label: string }> = [],
   styleUris?: SettingsStyleUris,
+  initialActiveConnectionId: string | null = null,
 ): string {
   const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
   const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/settings.css';
@@ -218,6 +219,7 @@ export function getSettingsHtml(
 
   // Existing connections for duplicate name validation
   var existingConnections = ${JSON.stringify(initialConnections.map((c) => ({ id: c.id, label: c.label }))).replace(/</g, '\\u003c')};
+  var activeConnectionId = ${JSON.stringify(initialActiveConnectionId || null)};
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const connType     = /** @type {HTMLSelectElement}   */ (document.getElementById('conn-type'));
@@ -544,16 +546,32 @@ export function getSettingsHtml(
     }
   }
 
+  function updateConnectButtonState() {
+    if (!connectBtn) return;
+    var currentId = connectBtn.dataset.connId || connId.value;
+    if (!currentId || connectBtn.style.display === 'none') {
+      return;
+    }
+    var isOpen = Boolean(activeConnectionId && activeConnectionId === currentId);
+    connectBtn.textContent = isOpen ? 'Disconnect' : 'Connect';
+    connectBtn.title = isOpen ? 'Disconnect this connection' : 'Connect to this connection';
+    connectBtn.disabled = false;
+
+    if (bannerConnectBtn && bannerConnectBtn.dataset.connId === currentId && bannerConnectBtn.style.display !== 'none') {
+      bannerConnectBtn.textContent = isOpen ? 'Disconnect' : 'Connect';
+      bannerConnectBtn.disabled = false;
+    }
+  }
+
   function setEditMode(label, idToConnect) {
     renderHeading(true, label);
     if (saveBtn) saveBtn.textContent = 'Save Changes';
     if (connectBtn) {
       connectBtn.style.display = 'inline-block';
-      connectBtn.disabled = false;
-      connectBtn.textContent = 'Connect';
       if (idToConnect) {
         connectBtn.dataset.connId = idToConnect;
       }
+      updateConnectButtonState();
     }
     if (clearBtn) {
       clearBtn.textContent = '+ New Connection';
@@ -567,6 +585,8 @@ export function getSettingsHtml(
     if (connectBtn) {
       connectBtn.style.display = 'none';
       delete connectBtn.dataset.connId;
+      connectBtn.textContent = 'Connect';
+      connectBtn.disabled = false;
     }
     if (clearBtn) {
       clearBtn.textContent = 'Clear';
@@ -607,14 +627,23 @@ export function getSettingsHtml(
   // ── Connect & Clear buttons ──────────────────────────────────────────────
   if (connectBtn) {
     connectBtn.addEventListener('click', function () {
-      var idToConnect = connectBtn.dataset.connId || connId.value;
-      if (idToConnect) {
+      var idToAct = connectBtn.dataset.connId || connId.value;
+      if (idToAct) {
+        var isOpen = Boolean(activeConnectionId && activeConnectionId === idToAct);
         connectBtn.disabled = true;
-        connectBtn.textContent = 'Connecting...';
-        vscode.postMessage({
-          type: 'activateConnection',
-          id: idToConnect,
-        });
+        if (isOpen) {
+          connectBtn.textContent = 'Disconnecting...';
+          vscode.postMessage({
+            type: 'disconnectConnection',
+            id: idToAct,
+          });
+        } else {
+          connectBtn.textContent = 'Connecting...';
+          vscode.postMessage({
+            type: 'activateConnection',
+            id: idToAct,
+          });
+        }
       }
     });
   }
@@ -727,7 +756,8 @@ export function getSettingsHtml(
         bannerConnectBtn.dataset.connId = connectId;
         bannerConnectBtn.style.display = 'inline-block';
         bannerConnectBtn.disabled = false;
-        bannerConnectBtn.textContent = 'Connect';
+        var isOpen = Boolean(activeConnectionId && activeConnectionId === connectId);
+        bannerConnectBtn.textContent = isOpen ? 'Disconnect' : 'Connect';
       } else {
         bannerConnectBtn.style.display = 'none';
         delete bannerConnectBtn.dataset.connId;
@@ -748,14 +778,23 @@ export function getSettingsHtml(
 
   if (bannerConnectBtn) {
     bannerConnectBtn.addEventListener('click', function () {
-      var idToConnect = bannerConnectBtn.dataset.connId;
-      if (idToConnect) {
+      var idToAct = bannerConnectBtn.dataset.connId;
+      if (idToAct) {
+        var isOpen = Boolean(activeConnectionId && activeConnectionId === idToAct);
         bannerConnectBtn.disabled = true;
-        bannerConnectBtn.textContent = 'Connecting...';
-        vscode.postMessage({
-          type: 'activateConnection',
-          id: idToConnect,
-        });
+        if (isOpen) {
+          bannerConnectBtn.textContent = 'Disconnecting...';
+          vscode.postMessage({
+            type: 'disconnectConnection',
+            id: idToAct,
+          });
+        } else {
+          bannerConnectBtn.textContent = 'Connecting...';
+          vscode.postMessage({
+            type: 'activateConnection',
+            id: idToAct,
+          });
+        }
       }
     });
   }
@@ -955,7 +994,15 @@ export function getSettingsHtml(
     if (!msg || !msg.type) return;
 
     switch (msg.type) {
+      case 'setActiveConnectionId':
+      case 'activeConnectionChanged':
+        activeConnectionId = msg.id || null;
+        updateConnectButtonState();
+        break;
       case 'newConnection':
+        if (msg.activeConnectionId !== undefined) {
+          activeConnectionId = msg.activeConnectionId;
+        }
         resetForm();
         if (connLabel) connLabel.focus();
         break;
@@ -973,6 +1020,9 @@ export function getSettingsHtml(
         break;
       case 'saveSuccess':
         hideBanner();
+        if (msg.activeConnectionId !== undefined) {
+          activeConnectionId = msg.activeConnectionId;
+        }
         connId.value = msg.connectionId;
         setEditMode(connLabel.value.trim(), msg.connectionId);
         if (Array.isArray(msg.connections)) {
@@ -1141,41 +1191,46 @@ export function getSettingsHtml(
         }
         break;
       case 'activateSuccess':
-        if (bannerConnectBtn) {
-          bannerConnectBtn.disabled = false;
-          bannerConnectBtn.textContent = 'Connect';
-        }
-        if (connectBtn) {
-          connectBtn.textContent = 'Connected ✓';
-          connectBtn.disabled = true;
-          setTimeout(function () {
-            connectBtn.textContent = 'Connect';
-            connectBtn.disabled = false;
-          }, 2500);
-        }
+        activeConnectionId = msg.id || connectBtn.dataset.connId || connId.value;
+        updateConnectButtonState();
         showBanner('Connection activated.', false);
         break;
       case 'activateError':
-        if (bannerConnectBtn) {
-          bannerConnectBtn.disabled = false;
-          bannerConnectBtn.textContent = 'Connect';
-        }
-        if (connectBtn) {
-          connectBtn.disabled = false;
-          connectBtn.textContent = 'Connect';
-        }
+        updateConnectButtonState();
         showBanner(msg.message || 'Could not activate connection.', true);
+        break;
+      case 'disconnectSuccess':
+        if (!msg.id || activeConnectionId === msg.id) {
+          activeConnectionId = null;
+        }
+        updateConnectButtonState();
+        showBanner('Connection disconnected.', false);
+        break;
+      case 'disconnectError':
+        updateConnectButtonState();
+        showBanner(msg.message || 'Could not disconnect connection.', true);
         break;
       case 'deleteSuccess':
         showBanner('Connection deleted.', false);
         if (msg.id) {
           existingConnections = existingConnections.filter(function(c) { return c.id !== msg.id; });
+          if (activeConnectionId === msg.id) {
+            activeConnectionId = null;
+            updateConnectButtonState();
+          }
         }
         break;
       case 'deleteError':
         showBanner(msg.message || 'Could not delete connection.', true);
         break;
       case 'editConnection':
+        if (msg.activeConnectionId !== undefined) {
+          activeConnectionId = msg.activeConnectionId;
+        } else if (msg.isActive === true) {
+          activeConnectionId = msg.config.id;
+        } else if (msg.isActive === false && activeConnectionId === msg.config.id) {
+          activeConnectionId = null;
+        }
         // Pre-fill form fields from msg.config
         connType.value         = msg.config.connectionType;
         connLabel.value        = msg.config.label;
