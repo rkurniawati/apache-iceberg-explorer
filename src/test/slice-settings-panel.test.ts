@@ -780,22 +780,28 @@ void (async () => {
     }
   });
 
-  await run('Settings panel client script executes without runtime errors during initialization', async () => {
+  await run('Settings panel client script executes and handles button clicks without runtime errors', async () => {
     const { getSettingsHtml } = await import('../panels/html/settings.js');
     const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
     const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
 
+    const listeners: Record<string, Record<string, Function[]>> = {};
     const mockElement = (id = '') => ({
       id,
       value: '',
       textContent: '',
       style: {},
       classList: { add() {}, remove() {} },
-      addEventListener() {},
+      addEventListener(evt: string, fn: Function) {
+        listeners[id] = listeners[id] || {};
+        listeners[id][evt] = listeners[id][evt] || [];
+        listeners[id][evt].push(fn);
+      },
       querySelectorAll() { return []; },
       scrollIntoView() {},
       dataset: {},
       disabled: false,
+      focus() {},
     });
 
     const elements: Record<string, any> = {};
@@ -807,9 +813,15 @@ void (async () => {
         return elements[id];
       },
       querySelectorAll() { return []; },
+      createElement(tag: string) { return mockElement(tag); },
+      createTextNode(text: string) { return { textContent: text }; },
     };
+    const windowListeners: Record<string, Function[]> = {};
     const mockWindow = {
-      addEventListener() {},
+      addEventListener(evt: string, fn: Function) {
+        windowListeners[evt] = windowListeners[evt] || [];
+        windowListeners[evt].push(fn);
+      },
     };
 
     for (const match of scriptMatches) {
@@ -817,6 +829,34 @@ void (async () => {
         const fn = new Function('acquireVsCodeApi', 'document', 'window', match[1]);
         fn(() => ({ postMessage() {} }), mockDocument, mockWindow);
       }, 'Settings webview script must not throw runtime errors on initialization');
+
+      // Test clicking save-btn (both validation failure and success paths)
+      const saveClicks = listeners['save-btn']?.['click'] || [];
+      assert.ok(saveClicks.length > 0, 'save-btn click listener should be registered');
+      for (const listener of saveClicks) {
+        assert.doesNotThrow(() => {
+          listener();
+        }, 'save-btn click listener must not throw ReferenceError or other errors');
+      }
+
+      // Populate valid fields and click save-btn again
+      elements['conn-type'].value = 'local';
+      elements['conn-label'].value = 'My Test Conn';
+      elements['warehouse-path'].value = '/path/to/warehouse';
+      for (const listener of saveClicks) {
+        assert.doesNotThrow(() => {
+          listener();
+        }, 'save-btn click listener with valid inputs must not throw');
+      }
+
+      // Test clicking clear-btn
+      const clearClicks = listeners['clear-btn']?.['click'] || [];
+      assert.ok(clearClicks.length > 0, 'clear-btn click listener should be registered');
+      for (const listener of clearClicks) {
+        assert.doesNotThrow(() => {
+          listener();
+        }, 'clear-btn click listener must not throw');
+      }
     }
   });
 
@@ -1075,6 +1115,7 @@ void (async () => {
     assert.ok(html.includes('id="clear-btn"'), 'HTML must contain clear-btn');
     assert.ok(html.includes('id="banner-connect-btn"'), 'HTML must contain banner-connect-btn');
     assert.ok(html.includes('id="status-banner-text"'), 'HTML must contain status-banner-text');
+    assert.ok(!html.includes('resetClearMode'), 'HTML must not reference undefined resetClearMode');
   });
 
   await run('revealing existing settings panel without editConfig posts newConnection message', async () => {

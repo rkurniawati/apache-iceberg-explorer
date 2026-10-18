@@ -764,7 +764,6 @@ export function getSettingsHtml(
   saveBtn.addEventListener('click', function () {
     clearErrors();
     hideBanner();
-    resetClearMode();
 
     var isS3  = connType.value === 's3';
     var isGcs = connType.value === 'gcs';
