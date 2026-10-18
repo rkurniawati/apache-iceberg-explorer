@@ -28,3 +28,6 @@ out/ecs/**
 *.md
 !README.md
 !CHANGELOG.md
+
+# Media / Assets (hosted remotely to reduce bundle size)
+iceberg-explorer-demo.gif
