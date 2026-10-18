@@ -19,6 +19,7 @@ import type { StorageAdapter } from '../storage/StorageAdapter.js';
 import type { ActiveConnectionHandle } from '../storage/types.js';
 import { isStorageError, type ErrorClass, type StorageError } from '../storage/errors.js';
 import type { ConnectionConfig } from '../connection/types.js';
+import type { BrowseDirectoryResult } from '../connection/index.js';
 import { PanelType, panelRegistryKey } from './types.js';
 import type { WebviewMessage } from './messages.js';
 import { generateNonce, getMetadataDetailHtml } from './html/metadataDetail.js';
@@ -1225,6 +1226,16 @@ export class WebviewPanelManager {
     deleteConnection:   (id: string) => Promise<void>,
     getExistingConfigs?: () => ConnectionConfig[],
     hasCredential?:     (id: string) => Promise<boolean>,
+    browseDirectoryCallback?: (
+      config: ConnectionConfig,
+      creds: { accessKey: string; secretKey: string },
+      dirPath?: string,
+    ) => Promise<BrowseDirectoryResult | StorageError | Error | { error: string }>,
+    detectWarehouseCallback?: (
+      config: ConnectionConfig,
+      creds: { accessKey: string; secretKey: string },
+      searchPath?: string,
+    ) => Promise<string[] | StorageError | Error>,
   ): Promise<void> {
     const key = panelRegistryKey(PanelType.Settings, 'settings');
     const existing = this.registry.get(key);
@@ -1337,7 +1348,10 @@ export class WebviewPanelManager {
               const message = isStorageError(err)
                 ? err.message
                 : (err instanceof Error ? err.message : 'Failed to save connection.');
-              void panel.webview.postMessage({ type: 'saveError', message });
+              const suggestedWarehousePath = (err && typeof err === 'object' && 'suggestedWarehousePath' in err)
+                ? String((err as any).suggestedWarehousePath)
+                : undefined;
+              void panel.webview.postMessage({ type: 'saveError', message, suggestedWarehousePath });
             }
             break;
           }
@@ -1385,6 +1399,130 @@ export class WebviewPanelManager {
             } catch (err: unknown) {
               const message = err instanceof Error ? err.message : String(err);
               this.logger.error(`Settings panel: browseKeyFile failed: ${message}`);
+            }
+            break;
+          }
+
+          case 'browseWarehouseFolderDialog': {
+            try {
+              const uris = await vscode.window.showOpenDialog({
+                canSelectFiles: false,
+                canSelectFolders: true,
+                canSelectMany: false,
+                title: 'Select Iceberg Warehouse Directory',
+              });
+              if (uris && uris[0]) {
+                void panel.webview.postMessage({
+                  type: 'warehousePathSelected',
+                  path: uris[0].fsPath,
+                });
+              }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              this.logger.error(`Settings panel: browseWarehouseFolderDialog failed: ${message}`);
+            }
+            break;
+          }
+
+          case 'browseDirectory': {
+            if (!browseDirectoryCallback) {
+              void panel.webview.postMessage({
+                type: 'browseDirectoryResult',
+                error: 'Browse directory capability is not available.',
+              });
+              break;
+            }
+            const config: ConnectionConfig = {
+              id: msg.id ? String(msg.id) : `conn-${Date.now()}`,
+              label: String(msg.label ?? '').trim() || 'Temp',
+              connectionType: (msg.connectionType as 'local' | 's3' | 'gcs'),
+              warehousePath: String(msg.warehousePath ?? '').trim(),
+              endpointUrl: msg.endpointUrl ? String(msg.endpointUrl).trim() : undefined,
+              region: msg.region ? String(msg.region).trim() : undefined,
+              sslVerification: Boolean(msg.sslVerification ?? true),
+              savedAt: Date.now(),
+              gcsAuthType: msg.gcsAuthType ? (String(msg.gcsAuthType) as 'adc' | 'serviceAccountKey') : undefined,
+              projectId: msg.projectId ? String(msg.projectId).trim() : undefined,
+            };
+            const creds = {
+              accessKey: String(msg.accessKey ?? '').trim(),
+              secretKey: String(msg.secretKey ?? '').trim(),
+            };
+            const dirPath = msg.dirPath !== undefined ? String(msg.dirPath).trim() : undefined;
+            try {
+              const result = await browseDirectoryCallback(config, creds, dirPath);
+              if (result instanceof Error || isStorageError(result)) {
+                void panel.webview.postMessage({
+                  type: 'browseDirectoryResult',
+                  error: result.message,
+                });
+              } else if ('error' in result) {
+                void panel.webview.postMessage({
+                  type: 'browseDirectoryResult',
+                  error: result.error,
+                });
+              } else {
+                void panel.webview.postMessage({
+                  type: 'browseDirectoryResult',
+                  currentPath: result.currentPath,
+                  parentPath: result.parentPath,
+                  items: result.items,
+                });
+              }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              void panel.webview.postMessage({
+                type: 'browseDirectoryResult',
+                error: message,
+              });
+            }
+            break;
+          }
+
+          case 'detectWarehouse': {
+            if (!detectWarehouseCallback) {
+              void panel.webview.postMessage({
+                type: 'detectWarehouseResult',
+                error: 'Auto-detection capability is not available.',
+              });
+              break;
+            }
+            const config: ConnectionConfig = {
+              id: msg.id ? String(msg.id) : `conn-${Date.now()}`,
+              label: String(msg.label ?? '').trim() || 'Temp',
+              connectionType: (msg.connectionType as 'local' | 's3' | 'gcs'),
+              warehousePath: String(msg.warehousePath ?? '').trim(),
+              endpointUrl: msg.endpointUrl ? String(msg.endpointUrl).trim() : undefined,
+              region: msg.region ? String(msg.region).trim() : undefined,
+              sslVerification: Boolean(msg.sslVerification ?? true),
+              savedAt: Date.now(),
+              gcsAuthType: msg.gcsAuthType ? (String(msg.gcsAuthType) as 'adc' | 'serviceAccountKey') : undefined,
+              projectId: msg.projectId ? String(msg.projectId).trim() : undefined,
+            };
+            const creds = {
+              accessKey: String(msg.accessKey ?? '').trim(),
+              secretKey: String(msg.secretKey ?? '').trim(),
+            };
+            const searchPath = msg.searchPath !== undefined ? String(msg.searchPath).trim() : undefined;
+            try {
+              const result = await detectWarehouseCallback(config, creds, searchPath);
+              if (result instanceof Error || isStorageError(result)) {
+                void panel.webview.postMessage({
+                  type: 'detectWarehouseResult',
+                  error: result.message,
+                });
+              } else {
+                void panel.webview.postMessage({
+                  type: 'detectWarehouseResult',
+                  suggestedPaths: result,
+                });
+              }
+            } catch (err: unknown) {
+              const message = err instanceof Error ? err.message : String(err);
+              void panel.webview.postMessage({
+                type: 'detectWarehouseResult',
+                error: message,
+              });
             }
             break;
           }

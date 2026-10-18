@@ -16,8 +16,15 @@ import { storageError } from '../storage/errors';
 import type { StorageError } from '../storage/errors';
 import type { ILogger } from '../extension';
 import { WebviewPanelManager } from '../panels/webviewPanelManager';
-import { validateConnectionInput, validateWarehouseStructure } from '../connection/validation';
+import { validateConnectionInput, validateWarehouseStructure, isAbsoluteLocalPath } from '../connection/validation';
 import { ConnectionManager } from '../connection/connectionManager';
+import {
+  browseDirectory,
+  findCandidateWarehouseRoots,
+  getParentPath,
+  joinStoragePath,
+  normaliseStoragePath,
+} from '../connection/discovery';
 
 // ---------------------------------------------------------------------------
 // The vscode mock (via test-setup.ts → __mocks__/vscode.ts) exposes
@@ -843,6 +850,22 @@ void (async () => {
       async isTable(_h: ActiveConnectionHandle, p: string) {
         return p === 's3://rk-iceberg/dogs/testdogs.db/dogtable1';
       },
+      async listDirectoryContents(_h: ActiveConnectionHandle, dirPath: string) {
+        const norm = dirPath.replace(/\/+$/, '');
+        if (norm === 's3://rk-iceberg') {
+          return { subdirectories: ['dogs'], files: [] };
+        }
+        if (norm === 's3://rk-iceberg/dogs') {
+          return { subdirectories: ['testdogs.db'], files: [] };
+        }
+        if (norm === 's3://rk-iceberg/dogs/testdogs.db') {
+          return { subdirectories: ['dogtable1'], files: [] };
+        }
+        if (norm === 's3://rk-iceberg/dogs/testdogs.db/dogtable1') {
+          return { subdirectories: ['metadata', 'data'], files: [] };
+        }
+        return { subdirectories: [], files: [] };
+      },
     } as any;
   }
 
@@ -1070,6 +1093,203 @@ void (async () => {
       assert.ok(saveSuccess, 'saveSuccess message was posted');
       assert.strictEqual(saveSuccess!.connectionId, 'conn-saved-123');
     });
+  });
+
+  await run('isAbsoluteLocalPath classifies POSIX, Windows drive, UNC, and relative paths correctly', async () => {
+    assert.strictEqual(isAbsoluteLocalPath('/var/data/iceberg'), true);
+    assert.strictEqual(isAbsoluteLocalPath('c:\\downloads\\iceberg'), true);
+    assert.strictEqual(isAbsoluteLocalPath('C:\\downloads\\iceberg'), true);
+    assert.strictEqual(isAbsoluteLocalPath('D:/downloads/iceberg'), true);
+    assert.strictEqual(isAbsoluteLocalPath('\\\\server\\share\\iceberg'), true);
+    assert.strictEqual(isAbsoluteLocalPath('downloads/iceberg'), false);
+    assert.strictEqual(isAbsoluteLocalPath('./downloads/iceberg'), false);
+    assert.strictEqual(isAbsoluteLocalPath('../downloads/iceberg'), false);
+    assert.strictEqual(isAbsoluteLocalPath(''), false);
+  });
+
+  await run('validateConnectionInput accepts Windows absolute paths for local connection', async () => {
+    const resBackslash = validateConnectionInput(
+      { id: 'win-1', label: 'Win Backslash', connectionType: 'local', warehousePath: 'c:\\downloads\\iceberg', sslVerification: true, savedAt: Date.now() },
+      { accessKey: '', secretKey: '' },
+    );
+    assert.strictEqual(resBackslash.valid, true);
+
+    const resSlash = validateConnectionInput(
+      { id: 'win-2', label: 'Win Slash', connectionType: 'local', warehousePath: 'C:/downloads/iceberg', sslVerification: true, savedAt: Date.now() },
+      { accessKey: '', secretKey: '' },
+    );
+    assert.strictEqual(resSlash.valid, true);
+
+    const resRelative = validateConnectionInput(
+      { id: 'rel-1', label: 'Relative Path', connectionType: 'local', warehousePath: 'downloads\\iceberg', sslVerification: true, savedAt: Date.now() },
+      { accessKey: '', secretKey: '' },
+    );
+    assert.strictEqual(resRelative.valid, false);
+    if (!resRelative.valid) {
+      assert.strictEqual(resRelative.errors[0].field, 'warehousePath');
+      assert.ok(resRelative.errors[0].message.includes('absolute path'));
+    }
+  });
+
+  // ── S3 / GCS / Local Browser & Auto-Detection Tests ─────────────────────────
+
+  await run('discovery path helpers: getParentPath, normaliseStoragePath, joinStoragePath', async () => {
+    assert.strictEqual(normaliseStoragePath('s3://my-bucket/dogs/'), 's3://my-bucket/dogs');
+    assert.strictEqual(normaliseStoragePath('gs://my-bucket/'), 'gs://my-bucket');
+    assert.strictEqual(normaliseStoragePath('gcs://my-bucket/path'), 'gs://my-bucket/path');
+
+    assert.strictEqual(joinStoragePath('s3://my-bucket', 'dogs'), 's3://my-bucket/dogs');
+    assert.strictEqual(joinStoragePath('s3://my-bucket/dogs', 'testdogs.db'), 's3://my-bucket/dogs/testdogs.db');
+
+    assert.strictEqual(getParentPath('s3://my-bucket'), null);
+    assert.strictEqual(getParentPath('s3://my-bucket/'), null);
+    assert.strictEqual(getParentPath('s3://my-bucket/dogs'), 's3://my-bucket');
+    assert.strictEqual(getParentPath('s3://my-bucket/dogs/testdogs.db'), 's3://my-bucket/dogs');
+    assert.strictEqual(getParentPath('gs://my-bucket/dogs/testdogs.db'), 'gs://my-bucket/dogs');
+  });
+
+  await run('browseDirectory detects schema and table badges accurately in S3', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: '', client: {} as any },
+    };
+
+    // Browse bucket root
+    const rootRes = await browseDirectory(handle, adapter, 's3://rk-iceberg');
+    assert.ok(!('error' in rootRes));
+    if (!('error' in rootRes)) {
+      assert.strictEqual(rootRes.currentPath, 's3://rk-iceberg');
+      assert.strictEqual(rootRes.parentPath, null);
+      assert.strictEqual(rootRes.items.length, 1);
+      assert.strictEqual(rootRes.items[0].name, 'dogs');
+      assert.strictEqual(rootRes.items[0].isTable, false);
+      assert.strictEqual(rootRes.items[0].isSchema, false);
+    }
+
+    // Browse dogs/
+    const dogsRes = await browseDirectory(handle, adapter, 's3://rk-iceberg/dogs');
+    assert.ok(!('error' in dogsRes));
+    if (!('error' in dogsRes)) {
+      assert.strictEqual(dogsRes.parentPath, 's3://rk-iceberg');
+      assert.strictEqual(dogsRes.items.length, 1);
+      assert.strictEqual(dogsRes.items[0].name, 'testdogs.db');
+      assert.strictEqual(dogsRes.items[0].isSchema, true); // contains dogtable1
+      assert.strictEqual(dogsRes.items[0].isTable, false);
+    }
+
+    // Browse dogs/testdogs.db/
+    const schemaRes = await browseDirectory(handle, adapter, 's3://rk-iceberg/dogs/testdogs.db');
+    assert.ok(!('error' in schemaRes));
+    if (!('error' in schemaRes)) {
+      assert.strictEqual(schemaRes.parentPath, 's3://rk-iceberg/dogs');
+      assert.strictEqual(schemaRes.items.length, 1);
+      assert.strictEqual(schemaRes.items[0].name, 'dogtable1');
+      assert.strictEqual(schemaRes.items[0].isTable, true);
+    }
+  });
+
+  await run('findCandidateWarehouseRoots discovers s3://rk-iceberg/dogs from bucket root', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: '', client: {} as any },
+    };
+
+    const candidates = await findCandidateWarehouseRoots(handle, adapter);
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0], 's3://rk-iceberg/dogs');
+  });
+
+  await run('findCandidateWarehouseRoots discovers s3://rk-iceberg/dogs when starting from schema path', async () => {
+    const adapter = makeMockAdapterForDogs();
+    const handle: ActiveConnectionHandle = {
+      connectionType: 's3',
+      warehousePath: 's3://rk-iceberg/dogs/testdogs.db',
+      s3Config: { bucket: 'rk-iceberg', keyPrefix: 'dogs/testdogs.db', client: {} as any },
+    };
+
+    const candidates = await findCandidateWarehouseRoots(handle, adapter);
+    assert.strictEqual(candidates.length, 1);
+    assert.strictEqual(candidates[0], 's3://rk-iceberg/dogs');
+  });
+
+  await run('Settings HTML includes Browse button, Detect button, Suggestion banner, and Warehouse browser', async () => {
+    const { getSettingsHtml } = await import('../panels/html/settings.js');
+    const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
+    assert.ok(html.includes('id="browse-warehouse-btn"'), 'HTML must contain browse-warehouse-btn');
+    assert.ok(html.includes('id="detect-warehouse-btn"'), 'HTML must contain detect-warehouse-btn');
+    assert.ok(html.includes('id="warehouse-browser"'), 'HTML must contain warehouse-browser');
+    assert.ok(html.includes('id="path-suggestion"'), 'HTML must contain path-suggestion');
+    assert.ok(html.includes('id="apply-suggestion-btn"'), 'HTML must contain apply-suggestion-btn');
+  });
+
+  await run('Settings panel handles browseDirectory and detectWarehouse messages', async () => {
+    await withFakePanel(async ({ getMessages, fireMessage }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      await mgr.openSettingsPanel(
+        undefined,
+        noopSaveConnection,
+        noopActivateConnection,
+        noopDeleteConnection,
+        undefined,
+        undefined,
+        async (_config, _creds, _dirPath) => ({
+          currentPath: 's3://rk-iceberg/dogs',
+          parentPath: 's3://rk-iceberg',
+          items: [{ name: 'testdogs.db', path: 's3://rk-iceberg/dogs/testdogs.db', isTable: false, isSchema: true }],
+        }),
+        async (_config, _creds, _searchPath) => ['s3://rk-iceberg/dogs'],
+      );
+
+      // Fire browseDirectory
+      await fireMessage({
+        type: 'browseDirectory',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg/dogs',
+      });
+
+      const msgs = getMessages();
+      const browseMsg = msgs.find((m) => m.type === 'browseDirectoryResult');
+      assert.ok(browseMsg, 'Expected browseDirectoryResult message');
+      assert.strictEqual(browseMsg!.currentPath, 's3://rk-iceberg/dogs');
+      assert.strictEqual((browseMsg as any).items.length, 1);
+
+      // Fire detectWarehouse
+      await fireMessage({
+        type: 'detectWarehouse',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+      });
+
+      const detectMsg = msgs.find((m) => m.type === 'detectWarehouseResult');
+      assert.ok(detectMsg, 'Expected detectWarehouseResult message');
+      assert.strictEqual((detectMsg as any).suggestedPaths[0], 's3://rk-iceberg/dogs');
+    });
+  });
+
+  await run('ConnectionManager saveConnection includes suggestedWarehousePath on failure', async () => {
+    const ctx = makeFakeContext();
+    const cm = new ConnectionManager(ctx, testLogger);
+    const adapter = makeMockAdapterForDogs();
+
+    const result = await cm.saveConnection(
+      {
+        id: 'auto-test',
+        label: 'Auto Detect Test',
+        connectionType: 's3',
+        warehousePath: 's3://rk-iceberg',
+        region: 'us-east-1',
+        sslVerification: true,
+      },
+      { accessKey: 'ak', secretKey: 'sk' },
+      adapter,
+    );
+
+    assert.ok(result instanceof Error, 'Expected saveConnection to fail for s3://rk-iceberg');
+    assert.strictEqual((result as any).suggestedWarehousePath, 's3://rk-iceberg/dogs');
   });
 
   // ── Summary ───────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ConnectionManager } from './connection/index.js';
+import { ConnectionManager, browseDirectory, findCandidateWarehouseRoots, buildHandleForPath } from './connection/index.js';
 import { WebviewPanelManager } from './panels/webviewPanelManager.js';
 import { LocalFsAdapter } from './storage/localFsAdapter.js';
 import { S3Adapter } from './storage/s3Adapter.js';
@@ -172,6 +172,21 @@ export function activate(context: vscode.ExtensionContext): void {
         },
         () => connectionManager.listConnections(),
         (id) => connectionManager.hasCredential(id),
+        async (config, creds, dirPath) => {
+          const handle = await connectionManager.createTemporaryHandle(config, creds);
+          if (handle instanceof Error) { return handle; }
+          const adapter = getAdapterForType(config.connectionType);
+          const targetPath = dirPath || config.warehousePath;
+          return browseDirectory(handle, adapter, targetPath);
+        },
+        async (config, creds, searchPath) => {
+          const handle = await connectionManager.createTemporaryHandle(config, creds);
+          if (handle instanceof Error) { return handle; }
+          const adapter = getAdapterForType(config.connectionType);
+          const targetPath = searchPath || config.warehousePath;
+          const pathHandle = buildHandleForPath(handle, targetPath);
+          return findCandidateWarehouseRoots(pathHandle, adapter);
+        },
       );
     }),
   );

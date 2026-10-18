@@ -115,18 +115,28 @@ export function validateConnectionInput(
   }
 
   if (config.connectionType === 'local') {
-    // CM-V5 — warehousePath must be non-empty and absolute (starts with "/" on macOS)
+    // CM-V5 — warehousePath must be non-empty and absolute (POSIX / or Windows drive C:\)
     if (!config.warehousePath || config.warehousePath.trim() === '') {
       errors.push({ field: 'warehousePath', message: 'Warehouse path is required.' });
-    } else if (!config.warehousePath.startsWith('/')) {
+    } else if (!isAbsoluteLocalPath(config.warehousePath)) {
       errors.push({
         field: 'warehousePath',
-        message: 'Warehouse path must be an absolute path (starting with /).',
+        message: 'Warehouse path must be an absolute path (starting with / or a drive letter like C:\\).',
       });
     }
   }
 
   return errors.length === 0 ? { valid: true } : { valid: false, errors };
+}
+
+/**
+ * Checks whether a string is an absolute filesystem path.
+ * Supports POSIX paths (/path/to/dir), Windows drive paths (C:\dir or C:/dir),
+ * and Windows UNC paths (\\server\share).
+ */
+export function isAbsoluteLocalPath(p: string): boolean {
+  if (!p) return false;
+  return /^(?:\/|[a-zA-Z]:[\\/]|\\\\)/.test(p.trim());
 }
 
 /**

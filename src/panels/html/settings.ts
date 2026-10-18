@@ -79,16 +79,6 @@ export function getSettingsHtml(
     <div class="field-error" id="err-label"></div>
   </div>
 
-  <!-- Warehouse path (local) / S3 URI (S3) / GCS URI (GCS) -->
-  <div class="field">
-    <label for="warehouse-path" id="warehouse-path-label">Warehouse path</label>
-    <input id="warehouse-path" type="text" placeholder="/absolute/path/to/warehouse" autocomplete="off">
-    <p id="warehouse-path-note" class="creds-note" style="display:none; margin-top:0.3rem;">
-      Points to the warehouse root in the bucket. Iceberg Explorer expects schemas and tables directly under this path: <code>s3://warehouse-path/&lt;schema&gt;/&lt;table&gt;/</code> containing <code>metadata/</code> and <code>data/</code> subdirectories.
-    </p>
-    <div class="field-error" id="err-path"></div>
-  </div>
-
   <!-- S3-only fields — disabled when connection type is local (FR-5) -->
   <div id="s3-fields">
     <div class="field">
@@ -169,6 +159,50 @@ export function getSettingsHtml(
     </div>
   </div>
 
+  <!-- Warehouse path (local) / S3 URI (S3) / GCS URI (GCS) -->
+  <div class="field">
+    <label for="warehouse-path" id="warehouse-path-label">Warehouse path</label>
+    <div style="display: flex; gap: 0.5rem; align-items: stretch;">
+      <input id="warehouse-path" type="text" placeholder="/absolute/path/to/warehouse" autocomplete="off" style="flex: 1;">
+      <button class="secondary" id="browse-warehouse-btn" type="button" title="Browse bucket or folder" style="white-space: nowrap;">Browse…</button>
+      <button class="secondary" id="detect-warehouse-btn" type="button" title="Auto-detect Iceberg warehouse root" style="white-space: nowrap;">Detect</button>
+    </div>
+    <p id="warehouse-path-note" class="creds-note" style="display:none; margin-top:0.3rem;">
+      Points to the warehouse root in the bucket. Iceberg Explorer expects schemas and tables directly under this path: <code>s3://warehouse-path/&lt;schema&gt;/&lt;table&gt;/</code> containing <code>metadata/</code> and <code>data/</code> subdirectories.
+    </p>
+    <div class="field-error" id="err-path"></div>
+    <div id="path-suggestion" class="suggestion-banner" style="display: none;">
+      <span class="suggestion-text">💡 Detected warehouse: <strong id="path-suggestion-value"></strong></span>
+      <button class="primary suggestion-btn" id="apply-suggestion-btn" type="button">Use this path</button>
+    </div>
+  </div>
+
+  <!-- Inline Warehouse Browser Drawer -->
+  <div id="warehouse-browser" class="warehouse-browser" style="display: none;">
+    <div class="browser-header">
+      <div class="browser-title-row">
+        <span class="browser-title">Warehouse Explorer</span>
+        <button class="browser-close-btn" id="browser-close-btn" type="button" title="Close browser">✕</button>
+      </div>
+      <div class="browser-toolbar">
+        <button class="secondary browser-nav-btn" id="browser-up-btn" type="button" title="Go up one folder" disabled>▲ Up</button>
+        <button class="secondary browser-nav-btn" id="browser-refresh-btn" type="button" title="Refresh">↻ Refresh</button>
+        <button class="secondary browser-nav-btn" id="browser-local-picker-btn" type="button" style="display: none;" title="Open OS Folder Picker">📁 Choose Folder…</button>
+        <div class="browser-path-display" id="browser-current-path" title="Current path"></div>
+      </div>
+    </div>
+    <div class="browser-status" id="browser-status" style="display: none;"></div>
+    <div class="browser-list-container" id="browser-list">
+      <div class="browser-list-empty">Click "Browse…" to explore bucket or folder contents.</div>
+    </div>
+    <div class="browser-footer">
+      <div class="browser-selection-info" id="browser-selected-info">
+        Selected: <code id="browser-selected-text">None</code>
+      </div>
+      <button class="primary" id="browser-select-btn" type="button" disabled>Select as Warehouse Path</button>
+    </div>
+  </div>
+
   <div class="btn-row">
     <button class="primary" id="save-btn" type="button">Save Connection</button>
     <button class="secondary" id="clear-btn" type="button">Clear</button>
@@ -217,6 +251,113 @@ export function getSettingsHtml(
   const statusBanner     = document.getElementById('status-banner');
   const statusBannerText = document.getElementById('status-banner-text');
   const bannerConnectBtn = /** @type {HTMLButtonElement} */ (document.getElementById('banner-connect-btn'));
+  const browseWarehouseBtn   = document.getElementById('browse-warehouse-btn');
+  const detectWarehouseBtn   = document.getElementById('detect-warehouse-btn');
+  const pathSuggestion       = document.getElementById('path-suggestion');
+  const pathSuggestionValue   = document.getElementById('path-suggestion-value');
+  const applySuggestionBtn   = document.getElementById('apply-suggestion-btn');
+  const warehouseBrowser     = document.getElementById('warehouse-browser');
+  const browserCloseBtn      = document.getElementById('browser-close-btn');
+  const browserUpBtn         = /** @type {HTMLButtonElement} */ (document.getElementById('browser-up-btn'));
+  const browserRefreshBtn    = document.getElementById('browser-refresh-btn');
+  const browserLocalPickerBtn= document.getElementById('browser-local-picker-btn');
+  const browserCurrentPath   = document.getElementById('browser-current-path');
+  const browserStatus        = document.getElementById('browser-status');
+  const browserList          = document.getElementById('browser-list');
+  const browserSelectedText  = document.getElementById('browser-selected-text');
+  const browserSelectBtn     = /** @type {HTMLButtonElement} */ (document.getElementById('browser-select-btn'));
+
+  var currentBrowsedPath = '';
+  var currentParentPath = null;
+  var currentSelectedPath = '';
+  var currentSuggestion = '';
+
+  function showSuggestion(path) {
+    currentSuggestion = path;
+    if (pathSuggestionValue) pathSuggestionValue.textContent = path;
+    if (pathSuggestion) pathSuggestion.style.display = 'flex';
+  }
+
+  function hideSuggestion() {
+    currentSuggestion = '';
+    if (pathSuggestion) pathSuggestion.style.display = 'none';
+    if (pathSuggestionValue) pathSuggestionValue.textContent = '';
+  }
+
+  function setBrowserStatus(msg, isError) {
+    if (!browserStatus) return;
+    if (!msg) {
+      browserStatus.style.display = 'none';
+      browserStatus.textContent = '';
+      browserStatus.className = 'browser-status';
+      return;
+    }
+    browserStatus.textContent = msg;
+    browserStatus.className = isError ? 'browser-status error' : 'browser-status';
+    browserStatus.style.display = 'block';
+  }
+
+  function setSelectedPath(path) {
+    currentSelectedPath = path;
+    if (browserSelectedText) browserSelectedText.textContent = path || 'None';
+    if (browserSelectBtn) browserSelectBtn.disabled = !path;
+  }
+
+  function escapeHtml(text) {
+    var div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+  }
+
+  function requestBrowse(targetPath) {
+    if (!warehouseBrowser) return;
+    warehouseBrowser.style.display = 'block';
+    setBrowserStatus('Loading directory contents...', false);
+    if (browserSelectBtn) browserSelectBtn.disabled = true;
+
+    var reqPath = targetPath !== undefined ? targetPath : warehousePath.value.trim();
+
+    vscode.postMessage({
+      type: 'browseDirectory',
+      id: connId.value || undefined,
+      connectionType: connType.value,
+      warehousePath: reqPath,
+      dirPath: reqPath,
+      endpointUrl: connType.value === 's3' && endpointUrl.value.trim() ? endpointUrl.value.trim() : undefined,
+      region: connType.value === 's3' ? region.value.trim() : undefined,
+      accessKey: connType.value === 's3' ? accessKey.value.trim() : undefined,
+      secretKey: connType.value === 's3' ? secretKey.value.trim() : (connType.value === 'gcs' ? getEffectiveGcsKey() : undefined),
+      sslVerification: connType.value === 's3' ? sslVerify.checked : true,
+      gcsAuthType: connType.value === 'gcs' && gcsAuthType ? gcsAuthType.value : undefined,
+      projectId: connType.value === 'gcs' && gcsProjectId ? gcsProjectId.value.trim() : undefined,
+    });
+  }
+
+  function requestDetect(targetPath) {
+    var p = targetPath || warehousePath.value.trim();
+    if (!p) {
+      showError('err-path', 'Please enter a bucket or directory path to detect warehouses.');
+      return;
+    }
+    clearErrors();
+    hideSuggestion();
+    showBanner('Scanning for Iceberg tables...', false);
+
+    vscode.postMessage({
+      type: 'detectWarehouse',
+      id: connId.value || undefined,
+      connectionType: connType.value,
+      warehousePath: p,
+      searchPath: p,
+      endpointUrl: connType.value === 's3' && endpointUrl.value.trim() ? endpointUrl.value.trim() : undefined,
+      region: connType.value === 's3' ? region.value.trim() : undefined,
+      accessKey: connType.value === 's3' ? accessKey.value.trim() : undefined,
+      secretKey: connType.value === 's3' ? secretKey.value.trim() : (connType.value === 'gcs' ? getEffectiveGcsKey() : undefined),
+      sslVerification: connType.value === 's3' ? sslVerify.checked : true,
+      gcsAuthType: connType.value === 'gcs' && gcsAuthType ? gcsAuthType.value : undefined,
+      projectId: connType.value === 'gcs' && gcsProjectId ? gcsProjectId.value.trim() : undefined,
+    });
+  }
 
   var gcsKeyMode = 'file'; // 'file' | 'paste'
 
@@ -370,6 +511,13 @@ export function getSettingsHtml(
       });
     }
     applyGcsAuthType();
+    if (browserLocalPickerBtn) {
+      browserLocalPickerBtn.style.display = connType.value === 'local' ? 'inline-block' : 'none';
+    }
+    if (warehouseBrowser) {
+      warehouseBrowser.style.display = 'none';
+    }
+    hideSuggestion();
   }
 
   connType.addEventListener('change', applyType);
@@ -403,7 +551,87 @@ export function getSettingsHtml(
     applyGcsAuthType();
     clearErrors();
     hideBanner();
+    hideSuggestion();
+    if (warehouseBrowser) {
+      warehouseBrowser.style.display = 'none';
+    }
   });
+
+  if (browseWarehouseBtn) {
+    browseWarehouseBtn.addEventListener('click', function() {
+      var isS3 = connType.value === 's3';
+      var isGcs = connType.value === 'gcs';
+      var currentVal = warehousePath.value.trim();
+
+      if (isS3 && (!currentVal || !new RegExp('^s3[an]?://[^/]+', 'i').test(currentVal))) {
+        showError('err-path', 'Please enter at least an S3 bucket (e.g. s3://my-bucket) to browse.');
+        warehousePath.focus();
+        return;
+      }
+      if (isGcs && (!currentVal || !new RegExp('^(?:gs|gcs)://[^/]+', 'i').test(currentVal))) {
+        showError('err-path', 'Please enter at least a GCS bucket (e.g. gs://my-bucket) to browse.');
+        warehousePath.focus();
+        return;
+      }
+
+      clearErrors();
+      requestBrowse(currentVal);
+    });
+  }
+
+  if (detectWarehouseBtn) {
+    detectWarehouseBtn.addEventListener('click', function() {
+      requestDetect(warehousePath.value.trim());
+    });
+  }
+
+  if (applySuggestionBtn) {
+    applySuggestionBtn.addEventListener('click', function() {
+      if (currentSuggestion) {
+        warehousePath.value = currentSuggestion;
+        hideSuggestion();
+        clearErrors();
+        hideBanner();
+      }
+    });
+  }
+
+  if (browserCloseBtn) {
+    browserCloseBtn.addEventListener('click', function() {
+      if (warehouseBrowser) warehouseBrowser.style.display = 'none';
+    });
+  }
+
+  if (browserUpBtn) {
+    browserUpBtn.addEventListener('click', function() {
+      if (currentParentPath) {
+        requestBrowse(currentParentPath);
+      }
+    });
+  }
+
+  if (browserRefreshBtn) {
+    browserRefreshBtn.addEventListener('click', function() {
+      requestBrowse(currentBrowsedPath || warehousePath.value.trim());
+    });
+  }
+
+  if (browserLocalPickerBtn) {
+    browserLocalPickerBtn.addEventListener('click', function() {
+      vscode.postMessage({ type: 'browseWarehouseFolderDialog' });
+    });
+  }
+
+  if (browserSelectBtn) {
+    browserSelectBtn.addEventListener('click', function() {
+      if (currentSelectedPath) {
+        warehousePath.value = currentSelectedPath;
+        if (warehouseBrowser) warehouseBrowser.style.display = 'none';
+        clearErrors();
+        hideSuggestion();
+      }
+    });
+  }
 
   // ── Validation helpers ────────────────────────────────────────────────────
   function showError(id, msg) {
@@ -492,8 +720,8 @@ export function getSettingsHtml(
     if (!path) {
       showError('err-path', isS3 ? 'Warehouse path (S3 URI) is required.' : isGcs ? 'Warehouse path (GCS URI) is required.' : 'Warehouse path is required.');
       valid = false;
-    } else if (!isS3 && !isGcs && !path.startsWith('/')) {
-      showError('err-path', 'Warehouse path must be an absolute path (starting with /).');
+    } else if (!isS3 && !isGcs && !(path.startsWith('/') || (path.length >= 3 && /^[a-zA-Z]$/.test(path[0]) && path[1] === ':' && (path[2] === '/' || path[2] === '\\\\')) || path.startsWith('\\\\\\\\'))) {
+      showError('err-path', 'Warehouse path must be an absolute path (starting with / or a drive letter like C:\\\\).');
       valid = false;
     } else if (isS3 && !new RegExp('^s3[an]?://[^/]+', 'i').test(path)) {
       showError('err-path', 'Warehouse path must be a valid S3 URI (e.g. s3://bucket/warehouse-path).');
@@ -695,6 +923,9 @@ export function getSettingsHtml(
           accessKey.value = MASK_VALUE;
           secretKey.value = MASK_VALUE;
         }
+        if (msg.suggestedWarehousePath) {
+          showSuggestion(msg.suggestedWarehousePath);
+        }
         if (msg.message && (msg.message.includes('label:') || msg.message.toLowerCase().includes('already exists'))) {
           var labelMsg = msg.message;
           if (labelMsg.includes('label:')) {
@@ -715,6 +946,117 @@ export function getSettingsHtml(
         }
         if (msg.message && (msg.message.toLowerCase().includes('service account') || msg.message.toLowerCase().includes('key file') || msg.message.toLowerCase().includes('json') || msg.message.includes('secretKey:'))) {
           showError('err-gcs-key', msg.message);
+        }
+        break;
+
+      case 'browseDirectoryResult':
+        if (msg.error) {
+          setBrowserStatus(msg.error, true);
+          if (browserList) {
+            browserList.innerHTML = '<div class="browser-list-empty">' + escapeHtml(msg.error) + '</div>';
+          }
+        } else {
+          setBrowserStatus('', false);
+          currentBrowsedPath = msg.currentPath || '';
+          currentParentPath = msg.parentPath || null;
+          if (browserCurrentPath) {
+            browserCurrentPath.textContent = currentBrowsedPath;
+            browserCurrentPath.title = currentBrowsedPath;
+          }
+          if (browserUpBtn) {
+            browserUpBtn.disabled = !currentParentPath;
+          }
+          setSelectedPath(currentBrowsedPath);
+
+          if (browserList) {
+            browserList.innerHTML = '';
+            var items = Array.isArray(msg.items) ? msg.items : [];
+            if (items.length === 0) {
+              browserList.innerHTML = '<div class="browser-list-empty">No subdirectories found in this path.</div>';
+            } else {
+              items.forEach(function(item) {
+                var row = document.createElement('div');
+                row.className = 'browser-item';
+
+                var left = document.createElement('div');
+                left.className = 'browser-item-left';
+
+                var icon = document.createElement('span');
+                icon.className = 'browser-item-icon';
+                icon.textContent = item.isTable ? '🧊' : (item.isSchema ? '🗄️' : '📁');
+                left.appendChild(icon);
+
+                var name = document.createElement('span');
+                name.className = 'browser-item-name';
+                name.textContent = item.name + '/';
+                left.appendChild(name);
+
+                row.appendChild(left);
+
+                var right = document.createElement('div');
+                right.className = 'browser-item-right';
+
+                if (item.isTable) {
+                  var badge = document.createElement('span');
+                  badge.className = 'browser-item-badge browser-badge-table';
+                  badge.textContent = 'Table';
+                  right.appendChild(badge);
+                } else if (item.isSchema) {
+                  var badge2 = document.createElement('span');
+                  badge2.className = 'browser-item-badge browser-badge-schema';
+                  badge2.textContent = 'Schema';
+                  right.appendChild(badge2);
+                }
+
+                var drillBtn = document.createElement('button');
+                drillBtn.type = 'button';
+                drillBtn.className = 'secondary browser-drill-btn';
+                drillBtn.textContent = 'Open →';
+                drillBtn.title = 'Explore inside ' + item.name;
+                drillBtn.addEventListener('click', function(e) {
+                  e.stopPropagation();
+                  requestBrowse(item.path);
+                });
+                right.appendChild(drillBtn);
+
+                row.appendChild(right);
+
+                row.addEventListener('click', function() {
+                  document.querySelectorAll('.browser-item').forEach(function(el) {
+                    el.classList.remove('selected');
+                  });
+                  row.classList.add('selected');
+                  setSelectedPath(item.path);
+                });
+
+                row.addEventListener('dblclick', function() {
+                  requestBrowse(item.path);
+                });
+
+                browserList.appendChild(row);
+              });
+            }
+          }
+        }
+        break;
+
+      case 'detectWarehouseResult':
+        if (msg.error) {
+          showBanner(msg.error, true);
+        } else if (Array.isArray(msg.suggestedPaths) && msg.suggestedPaths.length > 0) {
+          showSuggestion(msg.suggestedPaths[0]);
+          showBanner('Detected Iceberg warehouse: ' + msg.suggestedPaths[0], false);
+        } else {
+          showBanner('No Iceberg tables detected under this path. Use Browse to navigate.', true);
+        }
+        break;
+
+      case 'warehousePathSelected':
+        if (warehousePath && msg.path) {
+          warehousePath.value = msg.path;
+          clearErrors();
+          hideSuggestion();
+          if (warehouseBrowser) warehouseBrowser.style.display = 'none';
         }
         break;
       case 'activateSuccess':

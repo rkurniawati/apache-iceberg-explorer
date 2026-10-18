@@ -20,6 +20,7 @@ import type { ConnectionConfig } from './types.js';
 import type { ActiveConnectionHandle, S3Config, GcsConfig } from '../storage/types.js';
 import type { StorageAdapter } from '../storage/StorageAdapter.js';
 import { validateConnectionInput, validateWarehouseStructure } from './validation.js';
+import { findCandidateWarehouseRoots } from './discovery.js';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -179,9 +180,25 @@ export class ConnectionManager {
       }
       const structureValidation = await validateWarehouseStructure(handle, adapter);
       if (!structureValidation.valid) {
-        const msg = structureValidation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
+        let suggestedWarehousePath: string | undefined;
+        try {
+          const candidates = await findCandidateWarehouseRoots(handle, adapter);
+          if (candidates.length > 0) {
+            suggestedWarehousePath = candidates[0];
+          }
+        } catch (autoErr) {
+          this._logger.warn(`Auto-detect failed: ${autoErr instanceof Error ? autoErr.message : String(autoErr)}`);
+        }
+        let msg = structureValidation.errors.map((e) => `${e.field}: ${e.message}`).join('; ');
+        if (suggestedWarehousePath) {
+          msg += ` Detected Iceberg warehouse at: ${suggestedWarehousePath}`;
+        }
         this._logger.warn(`ConnectionManager.saveConnection: warehouse structure validation failed — ${msg}`);
-        return new Error(`Validation failed: ${msg}`);
+        const err = new Error(`Validation failed: ${msg}`);
+        if (suggestedWarehousePath) {
+          (err as any).suggestedWarehousePath = suggestedWarehousePath;
+        }
+        return err;
       }
     }
 
@@ -330,6 +347,78 @@ export class ConnectionManager {
       warehousePath: config.warehousePath,
       s3Config,
     };
+  }
+
+  /**
+   * Builds an ephemeral ActiveConnectionHandle from unpersisted connection settings and credentials.
+   * Resolves masked credentials from SecretStorage if config.id refers to an existing saved connection.
+   */
+  async createTemporaryHandle(
+    config: ConnectionConfig,
+    credentials: { accessKey: string; secretKey: string },
+  ): Promise<ActiveConnectionHandle | Error> {
+    let effectiveAccessKey = credentials.accessKey ? credentials.accessKey.trim() : '';
+    let effectiveSecretKey = credentials.secretKey ? credentials.secretKey.trim() : '';
+
+    if (config.connectionType === 's3' || config.connectionType === 'gcs') {
+      const existingCred = config.id ? await this._loadCredential(config.id) : undefined;
+      if (isMaskedCredential(effectiveAccessKey)) {
+        effectiveAccessKey = existingCred?.ak ?? '';
+      }
+      if (isMaskedCredential(effectiveSecretKey)) {
+        effectiveSecretKey = existingCred?.sk ?? '';
+      }
+    }
+
+    const effectiveCreds = {
+      accessKey: effectiveAccessKey,
+      secretKey: effectiveSecretKey,
+    };
+
+    if (config.connectionType === 's3') {
+      const s3Uri = (config.warehousePath || '').trim();
+      const match = /^s3[an]?:\/\/([^/]+)/i.exec(s3Uri);
+      if (!match) {
+        return new Error('A valid S3 URI with a bucket (e.g. s3://bucket-name) is required.');
+      }
+      try {
+        const s3Config = buildS3Config(config, {
+          ak: effectiveCreds.accessKey.trim(),
+          sk: effectiveCreds.secretKey.trim(),
+        });
+        return {
+          connectionType: 's3',
+          warehousePath: s3Uri,
+          s3Config,
+        };
+      } catch (err: unknown) {
+        return err instanceof Error ? err : new Error(String(err));
+      }
+    } else if (config.connectionType === 'gcs') {
+      const gcsUri = (config.warehousePath || '').trim();
+      const match = /^(?:gs|gcs):\/\/([^/]+)/i.exec(gcsUri);
+      if (!match) {
+        return new Error('A valid GCS URI with a bucket (e.g. gs://bucket-name) is required.');
+      }
+      try {
+        const gcsConfig = buildGcsConfig(config, {
+          ak: 'gcs',
+          sk: effectiveCreds.secretKey.trim(),
+        });
+        return {
+          connectionType: 'gcs',
+          warehousePath: gcsUri,
+          gcsConfig,
+        };
+      } catch (err: unknown) {
+        return err instanceof Error ? err : new Error(String(err));
+      }
+    } else {
+      return {
+        connectionType: 'local',
+        warehousePath: config.warehousePath || os.homedir(),
+      };
+    }
   }
 
   // -------------------------------------------------------------------------
