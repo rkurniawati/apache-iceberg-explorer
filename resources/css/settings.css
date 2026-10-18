@@ -51,6 +51,19 @@ textarea:focus {
   outline-offset: -1px;
 }
 
+input.invalid,
+select.invalid,
+textarea.invalid {
+  border-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground)) !important;
+  background-color: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.08));
+}
+
+input.invalid:focus,
+select.invalid:focus,
+textarea.invalid:focus {
+  outline-color: var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+}
+
 input:disabled,
 select:disabled,
 textarea:disabled {
@@ -116,10 +129,11 @@ textarea {
 
 /* Inline field error */
 .field-error {
-  color: var(--vscode-errorForeground);
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
   font-size: 0.88em;
-  margin-top: 0.2rem;
+  margin-top: 0.25rem;
   display: none;
+  line-height: 1.3;
 }
 
 .field-error.visible {
@@ -189,9 +203,24 @@ button.secondary:hover {
 }
 
 #status-banner.error {
-  display: block;
-  color: var(--vscode-errorForeground);
-  border: 1px solid var(--vscode-errorForeground);
+  display: flex;
+  background: var(--vscode-inputValidation-errorBackground, rgba(255, 0, 0, 0.1));
+  color: var(--vscode-inputValidation-errorForeground, var(--vscode-errorForeground));
+  border: 1px solid var(--vscode-inputValidation-errorBorder, var(--vscode-errorForeground));
+}
+
+#status-banner-content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 0;
+}
+
+#status-banner-icon {
+  font-size: 1.05em;
+  flex-shrink: 0;
+  line-height: 1;
 }
 
 #banner-connect-btn {

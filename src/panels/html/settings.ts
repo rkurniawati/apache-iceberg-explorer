@@ -52,8 +52,11 @@ export function getSettingsHtml(
 
 <h1>Iceberg Explorer — Connection Settings</h1>
 
-<div id="status-banner">
-  <span id="status-banner-text"></span>
+<div id="status-banner" role="status" aria-live="polite">
+  <div id="status-banner-content">
+    <span id="status-banner-icon" aria-hidden="true" style="display: none;"></span>
+    <span id="status-banner-text"></span>
+  </div>
   <button class="primary" id="banner-connect-btn" type="button" style="display: none;">Connect</button>
 </div>
 
@@ -254,6 +257,7 @@ export function getSettingsHtml(
   const clearBtn         = document.getElementById('clear-btn');
   const statusBanner     = document.getElementById('status-banner');
   const statusBannerText = document.getElementById('status-banner-text');
+  const statusBannerIcon = document.getElementById('status-banner-icon');
   const bannerConnectBtn = /** @type {HTMLButtonElement} */ (document.getElementById('banner-connect-btn'));
   const browseWarehouseBtn   = document.getElementById('browse-warehouse-btn');
   const detectWarehouseBtn   = document.getElementById('detect-warehouse-btn');
@@ -397,10 +401,14 @@ export function getSettingsHtml(
   }
 
   function clearGcsKeyError() {
-    var el = document.getElementById('err-gcs-key');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
+    clearFieldError('err-gcs-key');
+    if (gcsKeyFile) {
+      gcsKeyFile.classList.remove('invalid');
+      gcsKeyFile.removeAttribute('aria-invalid');
+    }
+    if (gcsKeyJson) {
+      gcsKeyJson.classList.remove('invalid');
+      gcsKeyJson.removeAttribute('aria-invalid');
     }
   }
 
@@ -730,19 +738,81 @@ export function getSettingsHtml(
   }
 
   // ── Validation helpers ────────────────────────────────────────────────────
+  function getInputElementForError(id) {
+    switch (id) {
+      case 'err-label': return connLabel;
+      case 'err-endpoint': return endpointUrl;
+      case 'err-region': return region;
+      case 'err-access-key': return accessKey;
+      case 'err-secret-key': return secretKey;
+      case 'err-gcs-key':
+        return (typeof gcsKeyMode !== 'undefined' && gcsKeyMode === 'paste') ? gcsKeyJson : gcsKeyFile;
+      case 'err-gcs-project': return gcsProjectId;
+      case 'err-path': return warehousePath;
+      default: return null;
+    }
+  }
+
   function showError(id, msg) {
     var el = document.getElementById(id);
-    if (!el) return;
-    el.textContent = msg;
-    el.classList.add('visible');
+    if (el) {
+      el.textContent = msg;
+      el.classList.add('visible');
+    }
+    var input = getInputElementForError(id);
+    if (input) {
+      input.classList.add('invalid');
+      if (typeof input.setAttribute === 'function') input.setAttribute('aria-invalid', 'true');
+    }
   }
+
+  function clearFieldError(id) {
+    var el = document.getElementById(id);
+    if (el) {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }
+    var input = getInputElementForError(id);
+    if (input) {
+      input.classList.remove('invalid');
+      if (typeof input.removeAttribute === 'function') input.removeAttribute('aria-invalid');
+    }
+  }
+
   function clearErrors() {
     document.querySelectorAll('.field-error').forEach(function(el) {
       el.textContent = '';
       el.classList.remove('visible');
     });
+    document.querySelectorAll('.invalid').forEach(function(el) {
+      el.classList.remove('invalid');
+      if (typeof el.removeAttribute === 'function') el.removeAttribute('aria-invalid');
+    });
   }
+
+  function focusFirstError() {
+    var firstInvalid = null;
+    if (typeof document.querySelector === 'function') {
+      firstInvalid = document.querySelector('.invalid');
+    } else if (typeof document.querySelectorAll === 'function') {
+      var all = document.querySelectorAll('.invalid');
+      if (all && all.length > 0) firstInvalid = all[0];
+    }
+    if (firstInvalid) {
+      if (typeof firstInvalid.scrollIntoView === 'function') {
+        firstInvalid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      if (typeof firstInvalid.focus === 'function') {
+        firstInvalid.focus();
+      }
+    }
+  }
+
   function showBanner(msg, isError, connectId) {
+    if (statusBannerIcon) {
+      statusBannerIcon.textContent = isError ? '⚠️' : '✓';
+      statusBannerIcon.style.display = 'inline-block';
+    }
     if (statusBannerText) {
       statusBannerText.textContent = msg;
     } else if (statusBanner) {
@@ -750,6 +820,9 @@ export function getSettingsHtml(
     }
     if (statusBanner) {
       statusBanner.className = isError ? 'error' : 'success';
+      if (typeof statusBanner.setAttribute === 'function') {
+        statusBanner.setAttribute('role', isError ? 'alert' : 'status');
+      }
     }
     if (bannerConnectBtn) {
       if (!isError && connectId) {
@@ -767,8 +840,18 @@ export function getSettingsHtml(
       statusBanner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
+
   function hideBanner() {
-    if (statusBanner) statusBanner.className = '';
+    if (statusBanner) {
+      statusBanner.className = '';
+      if (typeof statusBanner.removeAttribute === 'function') {
+        statusBanner.removeAttribute('role');
+      }
+    }
+    if (statusBannerIcon) {
+      statusBannerIcon.textContent = '';
+      statusBannerIcon.style.display = 'none';
+    }
     if (statusBannerText) statusBannerText.textContent = '';
     if (bannerConnectBtn) {
       bannerConnectBtn.style.display = 'none';
@@ -875,7 +958,11 @@ export function getSettingsHtml(
       }
     }
 
-    if (!valid) return;
+    if (!valid) {
+      showBanner('Please correct the highlighted errors before saving.', true);
+      focusFirstError();
+      return;
+    }
 
     var gcsSecret = isGcs && gcsAuthType && gcsAuthType.value === 'serviceAccountKey' ? getEffectiveGcsKey() : undefined;
 
@@ -933,59 +1020,31 @@ export function getSettingsHtml(
   }
   if (gcsProjectId) {
     gcsProjectId.addEventListener('input', function () {
-      var el = document.getElementById('err-gcs-project');
-      if (el) {
-        el.textContent = '';
-        el.classList.remove('visible');
-      }
+      clearFieldError('err-gcs-project');
     });
   }
 
   // Clear field errors when the user types
   connLabel.addEventListener('input', function () {
-    var el = document.getElementById('err-label');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-label');
     if (connId.value) {
       renderHeading(true, connLabel.value.trim() || 'Untitled');
     }
   });
   warehousePath.addEventListener('input', function () {
-    var el = document.getElementById('err-path');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-path');
   });
   endpointUrl.addEventListener('input', function () {
-    var el = document.getElementById('err-endpoint');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-endpoint');
   });
   region.addEventListener('input', function () {
-    var el = document.getElementById('err-region');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-region');
   });
   accessKey.addEventListener('input', function () {
-    var el = document.getElementById('err-access-key');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-access-key');
   });
   secretKey.addEventListener('input', function () {
-    var el = document.getElementById('err-secret-key');
-    if (el) {
-      el.textContent = '';
-      el.classList.remove('visible');
-    }
+    clearFieldError('err-secret-key');
   });
 
   // ── Messages from extension host ─────────────────────────────────────────
@@ -1078,6 +1137,7 @@ export function getSettingsHtml(
         if (msg.message && (msg.message.toLowerCase().includes('service account') || msg.message.toLowerCase().includes('key file') || msg.message.toLowerCase().includes('json') || msg.message.includes('secretKey:'))) {
           showError('err-gcs-key', msg.message);
         }
+        focusFirstError();
         break;
 
       case 'browseDirectoryResult':
