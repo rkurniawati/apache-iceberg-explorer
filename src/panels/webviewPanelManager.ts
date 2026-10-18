@@ -1268,6 +1268,10 @@ export class WebviewPanelManager {
           },
           hasSavedCredentials,
         });
+      } else {
+        void existing.panel.webview.postMessage({
+          type: 'newConnection',
+        });
       }
       return;
     }
@@ -1336,6 +1340,7 @@ export class WebviewPanelManager {
               secretKey: String(msg.secretKey ?? '').trim(),
             };
             try {
+              const isEdit = Boolean(msg.id);
               const savedId = await saveConnection(config, creds);
               const effectiveId = (typeof savedId === 'string' && savedId) ? savedId : config.id;
               const currentConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : undefined;
@@ -1343,7 +1348,23 @@ export class WebviewPanelManager {
                 type: 'saveSuccess',
                 connections: currentConns,
                 connectionId: effectiveId,
+                label: config.label,
               });
+              const toastMessage = isEdit
+                ? `Changes to "${config.label}" saved.`
+                : `Connection "${config.label}" saved.`;
+              void vscode.window
+                .showInformationMessage(toastMessage, 'Connect')
+                .then(async (action) => {
+                  if (action === 'Connect' && activateConnection) {
+                    const result = await activateConnection(effectiveId);
+                    if (isStorageError(result)) {
+                      void panel.webview.postMessage({ type: 'activateError', message: result.message });
+                    } else {
+                      void panel.webview.postMessage({ type: 'activateSuccess' });
+                    }
+                  }
+                });
             } catch (err: unknown) {
               const message = isStorageError(err)
                 ? err.message

@@ -1071,8 +1071,24 @@ void (async () => {
     const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
     assert.ok(html.includes('id="save-btn"'), 'HTML must contain save-btn');
     assert.ok(html.includes('Save Connection'), 'HTML must have "Save Connection" text');
+    assert.ok(html.includes('id="connect-btn"'), 'HTML must contain connect-btn');
+    assert.ok(html.includes('id="clear-btn"'), 'HTML must contain clear-btn');
     assert.ok(html.includes('id="banner-connect-btn"'), 'HTML must contain banner-connect-btn');
     assert.ok(html.includes('id="status-banner-text"'), 'HTML must contain status-banner-text');
+  });
+
+  await run('revealing existing settings panel without editConfig posts newConnection message', async () => {
+    await withFakePanel(async ({ getMessages }) => {
+      const mgr = new WebviewPanelManager(fakeContext, fakeStorageAdapter, testLogger);
+      // First open
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+      // Second open with no editConfig (e.g. clicking + in tree view)
+      await mgr.openSettingsPanel(undefined, noopSaveConnection, noopActivateConnection, noopDeleteConnection);
+
+      const msgs = getMessages();
+      const newConnMsg = msgs.find((m) => m.type === 'newConnection');
+      assert.ok(newConnMsg, `expected newConnection in messages: ${JSON.stringify(msgs)}`);
+    });
   });
 
   await run('saveSuccess message includes connectionId for newly saved connection', async () => {

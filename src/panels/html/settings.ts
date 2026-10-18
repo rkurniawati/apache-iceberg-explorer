@@ -205,6 +205,7 @@ export function getSettingsHtml(
 
   <div class="btn-row">
     <button class="primary" id="save-btn" type="button">Save Connection</button>
+    <button class="secondary" id="connect-btn" type="button" style="display: none;">Connect</button>
     <button class="secondary" id="clear-btn" type="button">Clear</button>
   </div>
 </section>
@@ -247,6 +248,7 @@ export function getSettingsHtml(
   const formHeading    = document.getElementById('form-heading');
   const credsNote      = document.getElementById('creds-note');
   const saveBtn          = document.getElementById('save-btn');
+  const connectBtn       = /** @type {HTMLButtonElement} */ (document.getElementById('connect-btn'));
   const clearBtn         = document.getElementById('clear-btn');
   const statusBanner     = document.getElementById('status-banner');
   const statusBannerText = document.getElementById('status-banner-text');
@@ -526,8 +528,53 @@ export function getSettingsHtml(
   }
   applyType(); // apply on load
 
-  // ── Clear button ─────────────────────────────────────────────────────────
-  clearBtn.addEventListener('click', function () {
+  // ── Mode & button helpers ────────────────────────────────────────────────
+  function renderHeading(isEdit, label) {
+    if (!formHeading) return;
+    if (isEdit) {
+      formHeading.textContent = '';
+      formHeading.appendChild(document.createTextNode('Edit Connection: '));
+      var sub = document.createElement('span');
+      sub.style.fontWeight = 'normal';
+      sub.style.opacity = '0.85';
+      sub.textContent = label || '';
+      formHeading.appendChild(sub);
+    } else {
+      formHeading.textContent = 'New Connection';
+    }
+  }
+
+  function setEditMode(label, idToConnect) {
+    renderHeading(true, label);
+    if (saveBtn) saveBtn.textContent = 'Save Changes';
+    if (connectBtn) {
+      connectBtn.style.display = 'inline-block';
+      connectBtn.disabled = false;
+      connectBtn.textContent = 'Connect';
+      if (idToConnect) {
+        connectBtn.dataset.connId = idToConnect;
+      }
+    }
+    if (clearBtn) {
+      clearBtn.textContent = '+ New Connection';
+      clearBtn.title = 'Start creating a new connection';
+    }
+  }
+
+  function setNewConnectionMode() {
+    renderHeading(false);
+    if (saveBtn) saveBtn.textContent = 'Save Connection';
+    if (connectBtn) {
+      connectBtn.style.display = 'none';
+      delete connectBtn.dataset.connId;
+    }
+    if (clearBtn) {
+      clearBtn.textContent = 'Clear';
+      clearBtn.title = 'Clear form';
+    }
+  }
+
+  function resetForm() {
     connId.value       = '';
     connLabel.value    = '';
     warehousePath.value= '';
@@ -543,11 +590,11 @@ export function getSettingsHtml(
     setGcsKeyMode('file');
     if (gcsProjectId) gcsProjectId.value = '';
     if (gcsCredsNote) gcsCredsNote.style.display = 'none';
-    if (formHeading) formHeading.textContent = 'New Connection';
     if (credsNote) {
       credsNote.textContent = '';
       credsNote.style.display = 'none';
     }
+    setNewConnectionMode();
     applyGcsAuthType();
     clearErrors();
     hideBanner();
@@ -555,6 +602,26 @@ export function getSettingsHtml(
     if (warehouseBrowser) {
       warehouseBrowser.style.display = 'none';
     }
+  }
+
+  // ── Connect & Clear buttons ──────────────────────────────────────────────
+  if (connectBtn) {
+    connectBtn.addEventListener('click', function () {
+      var idToConnect = connectBtn.dataset.connId || connId.value;
+      if (idToConnect) {
+        connectBtn.disabled = true;
+        connectBtn.textContent = 'Connecting...';
+        vscode.postMessage({
+          type: 'activateConnection',
+          id: idToConnect,
+        });
+      }
+    });
+  }
+
+  clearBtn.addEventListener('click', function () {
+    resetForm();
+    if (connLabel) connLabel.focus();
   });
 
   if (browseWarehouseBtn) {
@@ -697,6 +764,7 @@ export function getSettingsHtml(
   saveBtn.addEventListener('click', function () {
     clearErrors();
     hideBanner();
+    resetClearMode();
 
     var isS3  = connType.value === 's3';
     var isGcs = connType.value === 'gcs';
@@ -842,6 +910,9 @@ export function getSettingsHtml(
       el.textContent = '';
       el.classList.remove('visible');
     }
+    if (connId.value) {
+      renderHeading(true, connLabel.value.trim() || 'Untitled');
+    }
   });
   warehousePath.addEventListener('input', function () {
     var el = document.getElementById('err-path');
@@ -885,6 +956,10 @@ export function getSettingsHtml(
     if (!msg || !msg.type) return;
 
     switch (msg.type) {
+      case 'newConnection':
+        resetForm();
+        if (connLabel) connLabel.focus();
+        break;
       case 'setExistingConnections':
         if (Array.isArray(msg.connections)) {
           existingConnections = msg.connections;
@@ -898,24 +973,31 @@ export function getSettingsHtml(
         }
         break;
       case 'saveSuccess':
-        showBanner('Connection saved.', false, msg.connectionId);
+        hideBanner();
+        connId.value = msg.connectionId;
+        setEditMode(connLabel.value.trim(), msg.connectionId);
         if (Array.isArray(msg.connections)) {
           existingConnections = msg.connections;
         }
-        // Reset form to "New Connection" state after a successful save
-        connId.value = '';
-        accessKey.value = '';
-        secretKey.value = '';
-        if (gcsKeyFile) gcsKeyFile.value = '';
-        if (gcsKeyJson) gcsKeyJson.value = '';
-        if (gcsJsonStatus) gcsJsonStatus.textContent = '';
-        setGcsKeyMode('file');
-        if (formHeading) formHeading.textContent = 'New Connection';
-        if (credsNote) {
-          credsNote.textContent = '';
-          credsNote.style.display = 'none';
+        if (connType.value === 's3') {
+          accessKey.value = MASK_VALUE;
+          secretKey.value = MASK_VALUE;
+          if (credsNote) {
+            credsNote.textContent = 'Existing credentials are saved. Enter new values only to update credentials.';
+            credsNote.style.display = 'block';
+          }
+          if (gcsCredsNote) gcsCredsNote.style.display = 'none';
+        } else if (connType.value === 'gcs') {
+          if (gcsAuthType && gcsAuthType.value === 'serviceAccountKey') {
+            if (gcsKeyFile) gcsKeyFile.value = MASK_VALUE;
+            if (gcsKeyJson) gcsKeyJson.value = '';
+            setGcsKeyMode('file');
+            if (gcsCredsNote) {
+              gcsCredsNote.textContent = 'Existing service account key is saved. Enter a new value only to update credentials.';
+              gcsCredsNote.style.display = 'block';
+            }
+          }
         }
-        if (gcsCredsNote) gcsCredsNote.style.display = 'none';
         break;
       case 'saveError':
         showBanner(msg.message || 'Failed to save connection.', true);
@@ -1064,12 +1146,24 @@ export function getSettingsHtml(
           bannerConnectBtn.disabled = false;
           bannerConnectBtn.textContent = 'Connect';
         }
+        if (connectBtn) {
+          connectBtn.textContent = 'Connected ✓';
+          connectBtn.disabled = true;
+          setTimeout(function () {
+            connectBtn.textContent = 'Connect';
+            connectBtn.disabled = false;
+          }, 2500);
+        }
         showBanner('Connection activated.', false);
         break;
       case 'activateError':
         if (bannerConnectBtn) {
           bannerConnectBtn.disabled = false;
           bannerConnectBtn.textContent = 'Connect';
+        }
+        if (connectBtn) {
+          connectBtn.disabled = false;
+          connectBtn.textContent = 'Connect';
         }
         showBanner(msg.message || 'Could not activate connection.', true);
         break;
@@ -1093,7 +1187,7 @@ export function getSettingsHtml(
         if (sslVerify && msg.config.sslVerification !== undefined) {
           sslVerify.checked    = msg.config.sslVerification !== false;
         }
-        if (formHeading) formHeading.textContent = 'Edit Connection';
+        setEditMode(msg.config.label, msg.config.id);
         if (msg.config.connectionType === 's3' && msg.hasSavedCredentials) {
           accessKey.value = MASK_VALUE;
           secretKey.value = MASK_VALUE;
