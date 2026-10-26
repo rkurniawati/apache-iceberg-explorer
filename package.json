@@ -140,9 +140,11 @@
     ]
   },
   "scripts": {
-    "compile": "tsc -p ./ && npm run bundle",
-    "bundle": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap",
-    "bundle:prod": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap && node scripts/bundle-duckdb.mjs --minify",
+    "compile": "tsc -p ./ && tsc -p tsconfig.webviews.json && npm run bundle",
+    "bundle": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --sourcemap && npm run bundle:webviews",
+    "bundle:webviews": "esbuild ./src/webviews/settings.ts ./src/webviews/metadataDetail.ts --bundle --outdir=out/webviews --format=iife --platform=browser --sourcemap",
+    "bundle:webviews:prod": "esbuild ./src/webviews/settings.ts ./src/webviews/metadataDetail.ts --bundle --outdir=out/webviews --format=iife --platform=browser --minify --sourcemap",
+    "bundle:prod": "esbuild ./src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap && npm run bundle:webviews:prod && node scripts/bundle-duckdb.mjs --minify",
     "copy-wasm": "node scripts/bundle-duckdb.mjs",
     "watch": "tsc -watch -p ./",
     "pretest": "npm run compile",
