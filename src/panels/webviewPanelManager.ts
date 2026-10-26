@@ -279,9 +279,11 @@ export class WebviewPanelManager {
     const nonce = generateNonce();
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'metadataDetail.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'metadataDetail.js');
     panel.webview.html = getMetadataDetailHtml(nonce, panel.webview.cspSource, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath, handle, adapter: effectiveAdapter, gate };
@@ -1298,9 +1300,11 @@ export class WebviewPanelManager {
     const initialConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : [];
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'settings.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'settings.js');
     panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     }, currentActiveId ?? null);
 
     // Cast to PanelRecord — settings panels carry no resourcePath or handle;
