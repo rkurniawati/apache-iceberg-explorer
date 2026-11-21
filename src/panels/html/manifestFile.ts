@@ -1,23 +1,22 @@
 /**
- * Manifest File Panel — HTML shell and client-side renderer.
+ * Manifest File Panel — HTML shell generator.
  *
  * Implements FR-12: display manifest file entries from an Avro manifest file.
  * NFR-8: CSP nonce. NFR-9: --vscode-* colours only. FR-18: breadcrumbs.
  * FR-20: user-readable errors. A-5: ORC files have no preview link.
+ *
+ * Client-side rendering script is located in src/webviews/manifestFile.ts
+ * and bundled to out/webviews/manifestFile.js.
  */
 import { generateNonce } from './metadataDetail.js';
-import {
-  escHtml,
-  breadcrumbHtml,
-  SET_STATE_SCRIPT,
-  ESC_SCRIPT,
-} from './shared.js';
+import { breadcrumbHtml } from './shared.js';
 
 export { generateNonce };
 
 export interface ManifestFileStyleUris {
   commonCssUri?: string | { toString(): string };
   panelCssUri?: string | { toString(): string };
+  scriptUri?: string | { toString(): string };
 }
 
 /**
@@ -31,13 +30,14 @@ export function getManifestFileHtml(
 ): string {
   const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
   const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/manifestFile.css';
+  const scriptSrc = styleUris?.scriptUri ?? 'out/webviews/manifestFile.js';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}' ${cspSource}; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Manifest File</title>
   <link rel="stylesheet" href="${commonCssHref}">
@@ -64,93 +64,7 @@ export function getManifestFileHtml(
       <tbody id="tbody"></tbody>
     </table>
   </div>
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-${SET_STATE_SCRIPT}
-${ESC_SCRIPT}
-
-    function renderRows(rows) {
-      document.getElementById('loading').style.display = 'none';
-      document.getElementById('error').style.display = 'none';
-      document.getElementById('table-wrapper').style.display = 'block';
-      const tbody = document.getElementById('tbody');
-      tbody.innerHTML = '';
-      for (const row of rows) {
-        const basename = row.filePath.split('/').pop() || row.filePath;
-        const fmt = (row.fileFormat || '').toUpperCase();
-        const isParquet = fmt === 'PARQUET';
-        const fileCell = isParquet
-          ? '<button class="file-link" title="' + escAttr(row.filePath) + '" data-path="' + escAttr(row.filePath) + '">' + escHtml(basename) + '</button>'
-          : '<span title="' + escAttr(row.filePath) + '">' + escHtml(basename) + '</span>';
-
-        const badgeClass = row.status === 1 ? 'badge-added' : row.status === 2 ? 'badge-deleted' : 'badge-existing';
-        const statusText = row.status === 0 ? 'EXISTING' : row.status === 1 ? 'ADDED' : row.status === 2 ? 'DELETED' : String(row.status);
-
-        const size = row.fileSizeBytes != null
-          ? (row.fileSizeBytes >= 1048576
-             ? (row.fileSizeBytes / 1048576).toFixed(1) + ' MB'
-             : row.fileSizeBytes >= 1024
-             ? (row.fileSizeBytes / 1024).toFixed(1) + ' KB'
-             : row.fileSizeBytes + ' B')
-          : '—';
-
-        const tr = document.createElement('tr');
-        tr.innerHTML =
-          '<td><span class="badge ' + badgeClass + '">' + statusText + '</span></td>' +
-          '<td>' + fileCell + '</td>' +
-          '<td>' + escHtml(fmt || '—') + '</td>' +
-          '<td>' + (row.recordCount ?? '—') + '</td>' +
-          '<td>' + size + '</td>';
-        tbody.appendChild(tr);
-      }
-    }
-
-    document.getElementById('tbody').addEventListener('click', (e) => {
-      const btn = e.target.closest('.file-link');
-      if (btn) { vscode.postMessage({ type: 'openParquetPreview', resourcePath: btn.dataset.path }); }
-    });
-
-    document.getElementById('retry-btn').addEventListener('click', () => {
-      vscode.postMessage({ type: 'retry' });
-    });
-
-    document.getElementById('breadcrumb').addEventListener('click', (e) => {
-      const btn = e.target.closest('.breadcrumb-link');
-      if (btn) { vscode.postMessage({ type: 'breadcrumbNavigate', segment: Number(btn.dataset.idx) }); }
-    });
-
-    const previousState = vscode.getState();
-    if (previousState?.type === 'loadManifestFile' && Array.isArray(previousState.rows)) {
-      try { renderRows(previousState.rows); } catch (_) {}
-    } else if (previousState?.type === 'setState' && previousState.state === 'error') {
-      applyState(previousState);
-    }
-
-    window.addEventListener('message', (event) => {
-      const msg = event.data;
-      if (!msg?.type) return;
-
-      if (msg.type === 'setState') {
-        if (msg.state !== 'loading' || !vscode.getState() || vscode.getState().type !== 'loadManifestFile') {
-          vscode.setState(msg);
-          applyState(msg);
-        }
-        return;
-      }
-
-      if (msg.type === 'loadManifestFile') {
-        try {
-          vscode.setState({ type: 'loadManifestFile', rows: msg.rows });
-          renderRows(msg.rows);
-        } catch (err) {
-          // swallow render errors
-        }
-      }
-    });
-
-    // Signal readiness only after the message listener is registered.
-    vscode.postMessage({ type: 'webviewReady' });
-  </script>
+  <script nonce="${nonce}" src="${scriptSrc}"></script>
 </body>
 </html>`;
 }

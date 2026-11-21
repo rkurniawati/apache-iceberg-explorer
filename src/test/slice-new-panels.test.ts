@@ -9,6 +9,7 @@
  *   npx ts-node -P tsconfig.test.json -r ./test-setup.ts src/test/slice-new-panels.test.ts
  */
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 
@@ -197,8 +198,11 @@ async function runTests() {
     assert.ok(html.includes('id="tab-snapshots"'), 'Contains Snapshots tab content');
     assert.ok(html.includes('id="schema-search"'), 'Contains schema filter input');
     assert.ok(html.includes('nonce="test-nonce"'), 'Nonce applied to scripts and styles');
-    assert.ok(html.includes("document.getElementById('table-name').textContent = (msg.isView ? 'View ' : 'Table ') + msg.tableName;"), 'Formats table header with Table prefix');
-    assert.ok(html.includes('webviewReady'), 'Posts webviewReady on init');
+    assert.ok(html.includes('src="out/webviews/tableOverview.js"'), 'References bundled tableOverview script');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/tableOverview.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+    assert.ok(scriptCode.includes("(msg.isView ? 'View ' : 'Table ') + msg.tableName") || scriptCode.includes('(msg.isView ? "View " : "Table ") + msg.tableName'), 'Formats table header with Table prefix');
+    assert.ok(scriptCode.includes('webviewReady'), 'Posts webviewReady on init');
   });
 
   await test('Table Overview: loads table metadata, schema columns, partitions, and snapshots', async () => {
@@ -244,7 +248,10 @@ async function runTests() {
     assert.ok(html.includes('id="schema-search"'), 'Contains searchable schema roster input');
     assert.ok(html.includes('id="schemas-tbody"'), 'Contains schemas table body');
     assert.ok(html.includes('id="edit-settings-btn"'), 'Contains Edit Settings button');
-    assert.ok(html.includes('data-action="open-schema"'), 'Contains open-schema action links');
+    assert.ok(html.includes('src="out/webviews/connectionDashboard.js"'), 'References bundled connectionDashboard script');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/connectionDashboard.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+    assert.ok(scriptCode.includes('data-action="open-schema"'), 'Contains open-schema action links');
     assert.ok(!html.includes('id="tables-tbody"'), 'Does not list tables on warehouse overview');
   });
 
@@ -390,8 +397,11 @@ async function runTests() {
   await test('Metadata Structure: HTML includes Snapshot Manifest Hierarchy and metadata version switcher', () => {
     const html = getMetadataStructureHtml('test-nonce', 'vscode-resource:', 's3://warehouse/db/events');
     assert.ok(!html.includes('onclick='), 'No inline onclick handler in HTML');
-    assert.ok(html.includes('preview-btn'), 'Includes preview-btn class for delegated preview click handling');
-    assert.ok(html.includes("'openParquetPreview'"), 'Includes openParquetPreview event posting');
+    assert.ok(html.includes('src="out/webviews/metadataStructure.js"'), 'References bundled metadataStructure script');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/metadataStructure.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+    assert.ok(scriptCode.includes('preview-btn'), 'Includes preview-btn class for delegated preview click handling');
+    assert.ok(scriptCode.includes('openParquetPreview'), 'Includes openParquetPreview event posting');
     assert.ok(html.includes('Snapshot Manifest Hierarchy'), 'Includes Snapshot Manifest Hierarchy section title');
     assert.ok(html.includes('meta-file-select'), 'Includes metadata file selector dropdown');
     assert.ok(html.includes('view-meta-json-btn'), 'Includes View JSON Details button');

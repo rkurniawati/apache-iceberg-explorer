@@ -9,6 +9,8 @@
  * Does NOT open a real VS Code window. Tests message-flow and temp-file lifecycle only.
  */
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import type { StorageAdapter } from '../storage/StorageAdapter';
 import type { ActiveConnectionHandle } from '../storage/types';
@@ -368,36 +370,31 @@ void (async () => {
   // ── Test 5: Manifest list HTML has clickable manifest-file links ─────────────
 
   await run('Manifest list HTML: 3 rows produce 3 openManifestFile links', () => {
-    const rows: ManifestEntryRow[] = [
-      { manifestPath: 's3://b/m1.avro', manifestLength: 1, partitionSpecId: 0, content: 0, snapshotId: 1 },
-      { manifestPath: 's3://b/m2.avro', manifestLength: 2, partitionSpecId: 0, content: 0, snapshotId: 1 },
-      { manifestPath: 's3://b/m3.avro', manifestLength: 3, partitionSpecId: 0, content: 0, snapshotId: 1 },
-    ];
-
     const html = getManifestListHtml('nonce123', 'vscode-resource:', 's3://b/snap.avro');
+    assert.ok(html.includes('<script nonce="nonce123" src="out/webviews/manifestList.js"></script>'), 'HTML must reference bundled manifestList script with nonce');
 
-    // Verify the HTML has the manifest link handler
-    // The manifest link script contains 'openManifestFile'
-    assert.ok(html.includes('openManifestFile'), 'HTML must reference openManifestFile message type');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/manifestList.js');
+    assert.ok(fs.existsSync(scriptPath), 'Bundled manifestList.js must exist');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
 
-    // The data-path attribute with manifest paths should be generatable in the webview
-    // The rows are injected at runtime via postMessage, not at HTML generation time
-    // So this test verifies the structure is wired for it
-    assert.ok(html.includes('manifest-link'), 'HTML must define manifest-link class for clickable rows');
+    assert.ok(scriptCode.includes('openManifestFile'), 'Script must reference openManifestFile message type');
+    assert.ok(scriptCode.includes('manifest-link'), 'Script must define manifest-link class for clickable rows');
   });
 
   // ── Test 6: Manifest file HTML — ORC file has no preview link ───────────────
 
   await run('Manifest file HTML: ORC file has no openParquetPreview reference in cell logic', () => {
     const html = getManifestFileHtml('nonce123', 'vscode-resource:', 's3://b/manifest.avro');
+    assert.ok(html.includes('<script nonce="nonce123" src="out/webviews/manifestFile.js"></script>'), 'HTML must reference bundled manifestFile script with nonce');
 
-    // The HTML script must check for PARQUET format before rendering a file-link
-    // It should NOT render file-link for non-PARQUET files
-    assert.ok(html.includes('PARQUET'), 'HTML must have PARQUET check to conditionally render link');
-    // The condition: only render file-link if fmt === 'PARQUET'
-    assert.ok(html.includes('isParquet'), 'HTML must guard file links behind isParquet check');
-    // Verify ORC path doesn't trigger link
-    assert.ok(!html.includes("fmt === 'ORC'"), 'ORC should not be explicitly targeted — no-link is the default');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/manifestFile.js');
+    assert.ok(fs.existsSync(scriptPath), 'Bundled manifestFile.js must exist');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+
+    // The script must check for PARQUET format before rendering a file-link
+    assert.ok(scriptCode.includes('PARQUET'), 'Script must have PARQUET check to conditionally render link');
+    assert.ok(scriptCode.includes('isParquet'), 'Script must guard file links behind isParquet check');
+    assert.ok(!scriptCode.includes("fmt === 'ORC'"), 'ORC should not be explicitly targeted — no-link is the default');
   });
 
   // ── Test 7: Parquet preview panel wasCapped banner ──────────────────────────
