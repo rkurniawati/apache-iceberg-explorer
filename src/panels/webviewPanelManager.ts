@@ -279,9 +279,11 @@ export class WebviewPanelManager {
     const nonce = generateNonce();
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'metadataDetail.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'metadataDetail.js');
     panel.webview.html = getMetadataDetailHtml(nonce, panel.webview.cspSource, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath, handle, adapter: effectiveAdapter, gate };
@@ -420,9 +422,11 @@ export class WebviewPanelManager {
 
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'manifestList.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'manifestList.js');
     panel.webview.html = getManifestListHtml(nonce, panel.webview.cspSource, resourcePath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     this.logger.info(`Panel opened: type=manifestList resource=${resourcePath}`);
@@ -555,9 +559,11 @@ export class WebviewPanelManager {
 
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'manifestFile.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'manifestFile.js');
     panel.webview.html = getManifestFileHtml(nonce, panel.webview.cspSource, resourcePath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     this.logger.info(`Panel opened: type=manifestFile resource=${resourcePath}`);
@@ -686,9 +692,11 @@ export class WebviewPanelManager {
 
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'parquetPreview.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'parquetPreview.js');
     panel.webview.html = getParquetPreviewHtml(nonce, panel.webview.cspSource, resourcePath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     this.logger.info(`Panel opened: type=parquetPreview resource=${resourcePath}`);
@@ -839,6 +847,7 @@ export class WebviewPanelManager {
 
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'adHocQuery.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'adHocQuery.js');
     panel.webview.html = getAdHocQueryHtml(
       nonce,
       panel.webview.cspSource,
@@ -847,6 +856,7 @@ export class WebviewPanelManager {
       {
         commonCssUri,
         panelCssUri,
+        scriptUri,
       },
     );
 
@@ -1298,9 +1308,11 @@ export class WebviewPanelManager {
     const initialConns = getExistingConfigs ? getExistingConfigs().map((c) => ({ id: c.id, label: c.label })) : [];
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'settings.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'settings.js');
     panel.webview.html = getSettingsHtml(nonce, panel.webview.cspSource, initialConns, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     }, currentActiveId ?? null);
 
     // Cast to PanelRecord — settings panels carry no resourcePath or handle;
@@ -1949,9 +1961,11 @@ export class WebviewPanelManager {
     const nonce = generateNonce();
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'tableOverview.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'tableOverview.js');
     panel.webview.html = getTableOverviewHtml(nonce, panel.webview.cspSource, tablePath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath: tablePath, handle, adapter: effectiveAdapter, gate };
@@ -2057,9 +2071,11 @@ export class WebviewPanelManager {
     const nonce = generateNonce();
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'connectionDashboard.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'connectionDashboard.js');
     panel.webview.html = getConnectionDashboardHtml(nonce, panel.webview.cspSource, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath: config.id, handle, adapter: effectiveAdapter, gate };
@@ -2159,9 +2175,11 @@ export class WebviewPanelManager {
     const gate = new WebviewReadyGate(panel, this.logger, 'schemaOverview');
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'schemaOverview.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'schemaOverview.js');
     panel.webview.html = getSchemaOverviewHtml(nonce, panel.webview.cspSource, schemaPath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath: schemaPath, handle, adapter: effectiveAdapter, gate };
@@ -2270,9 +2288,11 @@ export class WebviewPanelManager {
     const nonce = generateNonce();
     const commonCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'common.css');
     const panelCssUri = this.toWebviewUri(panel.webview, 'resources', 'css', 'metadataStructure.css');
+    const scriptUri = this.toWebviewUri(panel.webview, 'out', 'webviews', 'metadataStructure.js');
     panel.webview.html = getMetadataStructureHtml(nonce, panel.webview.cspSource, cleanTablePath, {
       commonCssUri,
       panelCssUri,
+      scriptUri,
     });
 
     const record: PanelRecord = { panel, resourcePath: cleanTablePath, handle, adapter: effectiveAdapter, gate };

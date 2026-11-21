@@ -382,14 +382,15 @@ void (async () => {
 
   await run('getMetadataDetailHtml script compiles without syntax errors and contains webviewReady', () => {
     const html = getMetadataDetailHtml('test-nonce', 'vscode-resource:');
-    const scriptMatch = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);
-    assert.ok(scriptMatch, 'Inline script tag must exist');
-    const scriptCode = scriptMatch[1];
-    assert.ok(scriptCode.includes("vscode.postMessage({ type: 'webviewReady' })"), 'Script must signal webviewReady');
-    // Ensure script compiles with zero syntax errors (guards against template literal escaping bugs)
+    assert.ok(html.includes('<script nonce="test-nonce"'), 'Script tag with nonce must exist');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/metadataDetail.js');
+    assert.ok(fs.existsSync(scriptPath), 'Bundled webview script must exist');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+    assert.ok(scriptCode.includes('webviewReady') && scriptCode.includes('postMessage'), 'Script must signal webviewReady');
+    // Ensure script compiles with zero syntax errors (guards against escaping bugs)
     assert.doesNotThrow(() => {
       new vm.Script(scriptCode);
-    }, 'Inline script must parse cleanly in JavaScript engine');
+    }, 'Bundled script must parse cleanly in JavaScript engine');
 
     // Ensure all getElementById IDs referenced in the script exist in the HTML
     const idRegex = /document\.getElementById\(['"]([^'"]+)['"]\)/g;
@@ -410,15 +411,17 @@ void (async () => {
     assert.ok(html.includes('id="raw-json-container"'), 'Raw JSON container must exist in HTML');
     assert.ok(html.includes('id="raw-json-code"'), 'Raw JSON code element must exist in HTML');
     assert.ok(html.includes('id="raw-json-stats"'), 'Raw JSON stats element must exist in HTML');
-    assert.ok(html.includes('class="json-key"'), 'Syntax highlighting class for keys must be defined in CSS');
-    assert.ok(html.includes('class="json-string"'), 'Syntax highlighting class for strings must be defined in CSS');
+    const cssPath = path.resolve(__dirname, '../../resources/css/metadataDetail.css');
+    const cssContent = fs.readFileSync(cssPath, 'utf8');
+    assert.ok(cssContent.includes('.json-key'), 'Syntax highlighting class for keys must be defined in CSS');
+    assert.ok(cssContent.includes('.json-string'), 'Syntax highlighting class for strings must be defined in CSS');
   });
 
   await run('client script formats raw JSON for humans and toggles between structured and raw views', () => {
     const html = getMetadataDetailHtml('test-nonce', 'vscode-resource:');
-    const scriptMatch = html.match(/<script nonce="test-nonce">([\s\S]*?)<\/script>/);
-    assert.ok(scriptMatch, 'Inline script tag must exist');
-    const scriptCode = scriptMatch[1];
+    assert.ok(html.includes('<script nonce="test-nonce"'), 'Script tag with nonce must exist');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/metadataDetail.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
 
     const elements: Record<string, any> = {};
     function getEl(id: string) {

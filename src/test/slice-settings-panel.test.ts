@@ -9,6 +9,8 @@
  * The `test-setup.ts` register intercepts `require('vscode')` and returns a stub.
  */
 import * as assert from 'node:assert';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
 
 import type { ConnectionConfig } from '../connection/types';
 import type { ActiveConnectionHandle } from '../storage/types';
@@ -771,25 +773,28 @@ void (async () => {
   await run('Settings panel client script contains valid JavaScript syntax without parse errors', async () => {
     const { getSettingsHtml } = await import('../panels/html/settings.js');
     const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
-    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
-    assert.ok(scriptMatches.length > 0, 'Settings HTML should contain at least one <script> tag');
-    for (const match of scriptMatches) {
-      assert.doesNotThrow(() => {
-        new Function('acquireVsCodeApi', match[1]);
-      }, 'Settings webview script must not have syntax errors');
-    }
+    assert.ok(html.includes('<script nonce="test-nonce"'), 'Settings HTML should contain script tag with nonce');
+    assert.ok(html.includes('id="settings-data"'), 'Settings HTML should contain settings-data JSON script');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/settings.js');
+    assert.ok(fs.existsSync(scriptPath), 'Bundled settings script must exist');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
+    assert.doesNotThrow(() => {
+      new Function('acquireVsCodeApi', scriptCode);
+    }, 'Settings webview script must not have syntax errors');
   });
 
   await run('Settings panel client script executes and handles button clicks without runtime errors', async () => {
     const { getSettingsHtml } = await import('../panels/html/settings.js');
     const html = getSettingsHtml('test-nonce', 'vscode-resource:', [{ id: 'c1', label: 'Existing' }]);
-    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
+    assert.ok(html.includes('<script nonce="test-nonce"'), 'Settings HTML should contain script tag with nonce');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/settings.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
 
     const listeners: Record<string, Record<string, Function[]>> = {};
     const mockElement = (id = '') => ({
       id,
       value: '',
-      textContent: '',
+      textContent: id === 'settings-data' ? JSON.stringify({ initialConnections: [{ id: 'c1', label: 'Existing' }], initialActiveConnectionId: null }) : '',
       style: {},
       classList: { add() {}, remove() {} },
       addEventListener(evt: string, fn: Function) {
@@ -799,6 +804,7 @@ void (async () => {
       },
       querySelectorAll() { return []; },
       scrollIntoView() {},
+      appendChild(child: any) { return child; },
       dataset: {},
       disabled: false,
       focus() {},
@@ -824,39 +830,37 @@ void (async () => {
       },
     };
 
-    for (const match of scriptMatches) {
+    assert.doesNotThrow(() => {
+      const fn = new Function('acquireVsCodeApi', 'document', 'window', scriptCode);
+      fn(() => ({ postMessage() {} }), mockDocument, mockWindow);
+    }, 'Settings webview script must not throw runtime errors on initialization');
+
+    // Test clicking save-btn (both validation failure and success paths)
+    const saveClicks = listeners['save-btn']?.['click'] || [];
+    assert.ok(saveClicks.length > 0, 'save-btn click listener should be registered');
+    for (const listener of saveClicks) {
       assert.doesNotThrow(() => {
-        const fn = new Function('acquireVsCodeApi', 'document', 'window', match[1]);
-        fn(() => ({ postMessage() {} }), mockDocument, mockWindow);
-      }, 'Settings webview script must not throw runtime errors on initialization');
+        listener();
+      }, 'save-btn click listener must not throw ReferenceError or other errors');
+    }
 
-      // Test clicking save-btn (both validation failure and success paths)
-      const saveClicks = listeners['save-btn']?.['click'] || [];
-      assert.ok(saveClicks.length > 0, 'save-btn click listener should be registered');
-      for (const listener of saveClicks) {
-        assert.doesNotThrow(() => {
-          listener();
-        }, 'save-btn click listener must not throw ReferenceError or other errors');
-      }
+    // Populate valid fields and click save-btn again
+    elements['conn-type'].value = 'local';
+    elements['conn-label'].value = 'My Test Conn';
+    elements['warehouse-path'].value = '/path/to/warehouse';
+    for (const listener of saveClicks) {
+      assert.doesNotThrow(() => {
+        listener();
+      }, 'save-btn click listener with valid inputs must not throw');
+    }
 
-      // Populate valid fields and click save-btn again
-      elements['conn-type'].value = 'local';
-      elements['conn-label'].value = 'My Test Conn';
-      elements['warehouse-path'].value = '/path/to/warehouse';
-      for (const listener of saveClicks) {
-        assert.doesNotThrow(() => {
-          listener();
-        }, 'save-btn click listener with valid inputs must not throw');
-      }
-
-      // Test clicking clear-btn
-      const clearClicks = listeners['clear-btn']?.['click'] || [];
-      assert.ok(clearClicks.length > 0, 'clear-btn click listener should be registered');
-      for (const listener of clearClicks) {
-        assert.doesNotThrow(() => {
-          listener();
-        }, 'clear-btn click listener must not throw');
-      }
+    // Test clicking clear-btn
+    const clearClicks = listeners['clear-btn']?.['click'] || [];
+    assert.ok(clearClicks.length > 0, 'clear-btn click listener should be registered');
+    for (const listener of clearClicks) {
+      assert.doesNotThrow(() => {
+        listener();
+      }, 'clear-btn click listener must not throw');
     }
   });
 
@@ -1440,15 +1444,19 @@ void (async () => {
       undefined,
       'conn-open',
     );
-    const scriptMatches = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/gi)];
-    assert.strictEqual(scriptMatches.length, 1);
+    assert.ok(html.includes('<script nonce="test-nonce"'), 'Settings HTML should contain script tag with nonce');
+    const scriptPath = path.resolve(__dirname, '../../out/webviews/settings.js');
+    const scriptCode = fs.readFileSync(scriptPath, 'utf8');
 
     const listeners: Record<string, Record<string, Function[]>> = {};
     const elements: Record<string, any> = {};
     const mockElement = (id = '') => ({
       id,
       value: '',
-      textContent: '',
+      textContent: id === 'settings-data' ? JSON.stringify({
+        initialConnections: [{ id: 'conn-open', label: 'Open Connection' }, { id: 'conn-other', label: 'Other Connection' }],
+        initialActiveConnectionId: 'conn-open',
+      }) : '',
       title: '',
       style: {},
       classList: { add() {}, remove() {} },
@@ -1488,7 +1496,7 @@ void (async () => {
       postMessage(msg: any) { postedMessages.push(msg); },
     });
 
-    const fn = new Function('acquireVsCodeApi', 'document', 'window', scriptMatches[0][1]);
+    const fn = new Function('acquireVsCodeApi', 'document', 'window', scriptCode);
     fn(mockVsCode, mockDocument, mockWindow);
 
     const messageHandlers = windowListeners['message'] || [];

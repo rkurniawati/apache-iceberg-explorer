@@ -1,5 +1,5 @@
 /**
- * Table Overview Panel — HTML shell and client-side renderer.
+ * Table Overview Panel — HTML shell generator.
  *
  * Implements:
  *  - Table Identity & Versioning header
@@ -7,13 +7,16 @@
  *  - Partition specifications
  *  - Embedded Data Preview with DuckDB-WASM
  *  - Snapshots list with link to Metadata Structure
+ *
+ * Client-side rendering script is located in src/webviews/tableOverview.ts
+ * and bundled to out/webviews/tableOverview.js.
  */
-import { escHtml, breadcrumbHtml } from './shared.js';
-import type { LoadTableOverviewMessage, LoadDataPreviewMessage } from '../messages.js';
+import { breadcrumbHtml } from './shared.js';
 
 export interface TableOverviewStyleUris {
   commonCssUri?: string | { toString(): string };
   panelCssUri?: string | { toString(): string };
+  scriptUri?: string | { toString(): string };
 }
 
 export function getTableOverviewHtml(
@@ -25,13 +28,14 @@ export function getTableOverviewHtml(
   const initialBreadcrumb = breadcrumbHtml(tablePath);
   const commonCssHref = styleUris?.commonCssUri ?? 'resources/css/common.css';
   const panelCssHref = styleUris?.panelCssUri ?? 'resources/css/tableOverview.css';
+  const scriptSrc = styleUris?.scriptUri ?? 'out/webviews/tableOverview.js';
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
+        content="default-src 'none'; script-src 'nonce-${nonce}' ${cspSource}; style-src ${cspSource} 'unsafe-inline'; img-src ${cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Table Overview</title>
   <link rel="stylesheet" href="${commonCssHref}">
@@ -164,384 +168,7 @@ export function getTableOverviewHtml(
     </div>
   </div>
 
-  <script nonce="${nonce}">
-    const vscode = acquireVsCodeApi();
-    vscode.postMessage({ type: 'webviewReady' });
-
-    let currentOverview = null;
-    let currentPreview = null;
-    let allColumns = [];
-    let allSnapshots = [];
-    let snapshotPage = 0;
-    const SNAPSHOTS_PER_PAGE = 10;
-
-    // Breadcrumbs
-    document.getElementById('breadcrumb')?.addEventListener('click', (e) => {
-      const btn = e.target.closest('.breadcrumb-link');
-      if (btn) {
-        vscode.postMessage({
-          type: 'breadcrumbNavigate',
-          segment: parseInt(btn.getAttribute('data-idx') || '0', 10),
-        });
-      }
-    });
-
-    // Retry
-    document.getElementById('retry-btn')?.addEventListener('click', () => {
-      vscode.postMessage({ type: 'retry' });
-    });
-
-    // Action buttons
-    document.getElementById('query-btn')?.addEventListener('click', () => {
-      if (currentOverview) {
-        vscode.postMessage({
-          type: 'openAdHocQuery',
-          resourcePath: currentOverview.tablePath,
-          initialSql: currentOverview.viewSql,
-        });
-      }
-    });
-
-    document.getElementById('copy-sql-btn')?.addEventListener('click', () => {
-      if (currentOverview?.viewSql) {
-        navigator.clipboard?.writeText(currentOverview.viewSql).catch(() => {});
-        const btn = document.getElementById('copy-sql-btn');
-        if (btn) {
-          const orig = btn.textContent;
-          btn.textContent = '✓ Copied!';
-          setTimeout(() => { btn.textContent = orig; }, 2000);
-        }
-      }
-    });
-
-    document.getElementById('view-metadata-btn')?.addEventListener('click', () => {
-      if (currentOverview?.latestMetadataPath) {
-        vscode.postMessage({ type: 'openMetadataPanel', resourcePath: currentOverview.latestMetadataPath });
-      }
-    });
-
-    document.getElementById('view-dag-btn')?.addEventListener('click', () => {
-      if (currentOverview) {
-        vscode.postMessage({ type: 'openMetadataStructure', resourcePath: currentOverview.tablePath });
-      }
-    });
-
-    document.getElementById('load-preview-btn')?.addEventListener('click', () => {
-      if (currentOverview) {
-        document.getElementById('preview-loading').style.display = 'block';
-        document.getElementById('preview-wrapper').style.display = 'none';
-        vscode.postMessage({ type: 'fetchDataPreview', tablePath: currentOverview.tablePath });
-      }
-    });
-
-    // Tabs
-    document.querySelectorAll('.tab-btn').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('.tab-btn').forEach((b) => b.classList.remove('active'));
-        document.querySelectorAll('.tab-content').forEach((c) => c.style.display = 'none');
-        btn.classList.add('active');
-        const tabKey = btn.getAttribute('data-tab');
-        document.getElementById('tab-' + tabKey).style.display = 'block';
-
-        if (tabKey === 'preview' && !currentPreview) {
-          document.getElementById('preview-loading').style.display = 'block';
-          vscode.postMessage({ type: 'fetchDataPreview', tablePath: currentOverview.tablePath });
-        }
-      });
-    });
-
-    // Filter columns
-    document.getElementById('schema-search')?.addEventListener('input', (e) => {
-      const q = e.target.value.toLowerCase();
-      renderColumns(allColumns.filter(c => c.name.toLowerCase().includes(q) || c.type.toLowerCase().includes(q)));
-    });
-
-    // Snapshot pagination
-    document.getElementById('snap-prev-btn')?.addEventListener('click', () => {
-      if (snapshotPage > 0) {
-        snapshotPage--;
-        renderSnapshots();
-      }
-    });
-
-    document.getElementById('snap-next-btn')?.addEventListener('click', () => {
-      const maxPage = Math.ceil(allSnapshots.length / SNAPSHOTS_PER_PAGE) - 1;
-      if (snapshotPage < maxPage) {
-        snapshotPage++;
-        renderSnapshots();
-      }
-    });
-
-    function renderColumns(cols) {
-      const tbody = document.getElementById('schema-tbody');
-      tbody.innerHTML = '';
-      cols.forEach((col) => {
-        const tr = document.createElement('tr');
-        tr.innerHTML = \`
-          <td style="color: var(--vscode-descriptionForeground);">\${col.id}</td>
-          <td><strong>\${esc(col.name)}</strong></td>
-          <td><code style="color: var(--vscode-symbolIcon-classForeground, #4ec9b0);">\${esc(col.type)}</code></td>
-          <td>\${col.required ? '<span style="color: #f87171;">Required</span>' : '<span style="opacity: 0.7;">Optional</span>'}</td>
-          <td style="color: var(--vscode-descriptionForeground);">\${esc(col.doc || '—')}</td>
-        \`;
-        tbody.appendChild(tr);
-      });
-      document.getElementById('column-count').textContent = cols.length;
-    }
-
-    function renderSnapshots() {
-      const list = document.getElementById('snapshots-list');
-      list.innerHTML = '';
-      const total = allSnapshots.length;
-      document.getElementById('snapshots-total').textContent = total;
-
-      const start = snapshotPage * SNAPSHOTS_PER_PAGE;
-      const end = Math.min(start + SNAPSHOTS_PER_PAGE, total);
-      const pageItems = allSnapshots.slice(start, end);
-
-      const maxPage = Math.max(0, Math.ceil(total / SNAPSHOTS_PER_PAGE) - 1);
-      document.getElementById('snap-page-indicator').textContent = \`Page \${snapshotPage + 1} of \${maxPage + 1}\`;
-      document.getElementById('snap-prev-btn').disabled = snapshotPage === 0;
-      document.getElementById('snap-next-btn').disabled = snapshotPage >= maxPage;
-
-      pageItems.forEach((s) => {
-        const card = document.createElement('div');
-        card.className = 'timeline-card';
-        const op = (s.operation || 'unknown').toLowerCase();
-        let opClass = 'op-append';
-        if (op.includes('overwrite')) opClass = 'op-overwrite';
-        else if (op.includes('replace')) opClass = 'op-replace';
-        else if (op.includes('delete')) opClass = 'op-delete';
-
-        const dateStr = new Date(s.timestampMs).toLocaleString();
-        const diffSummary = [];
-        if (s.addedRecords) diffSummary.push(\`+\${s.addedRecords} records\`);
-        if (s.deletedRecords) diffSummary.push(\`-\${s.deletedRecords} records\`);
-        if (s.addedFiles) diffSummary.push(\`+\${s.addedFiles} files\`);
-
-        card.innerHTML = \`
-          <div class="timeline-left">
-            <div style="display: flex; align-items: center; gap: 0.5rem;">
-              <span class="timeline-id">#\${s.snapshotId}</span>
-              <span class="op-badge \${opClass}">\${esc(s.operation || 'commit')}</span>
-            </div>
-            <div class="timeline-meta">\${dateStr} \${s.parentSnapshotId ? ' &bull; parent: #' + s.parentSnapshotId : ''}</div>
-          </div>
-          <div style="font-size: 0.85rem; color: var(--vscode-descriptionForeground);">
-            \${diffSummary.join(' &bull; ')}
-          </div>
-        \`;
-        list.appendChild(card);
-      });
-    }
-
-    function renderPreview(data) {
-      document.getElementById('preview-loading').style.display = 'none';
-      const wrapper = document.getElementById('preview-wrapper');
-      const errBox = document.getElementById('preview-error');
-
-      if (data.error) {
-        errBox.textContent = data.error;
-        errBox.style.display = 'block';
-        wrapper.style.display = 'none';
-        return;
-      }
-      errBox.style.display = 'none';
-      wrapper.style.display = 'block';
-
-      const thead = document.getElementById('preview-thead');
-      const tbody = document.getElementById('preview-tbody');
-      thead.innerHTML = '';
-      tbody.innerHTML = '';
-
-      const tr = document.createElement('tr');
-      data.columns.forEach((col) => {
-        const th = document.createElement('th');
-        th.textContent = col;
-        tr.appendChild(th);
-      });
-      thead.appendChild(tr);
-
-      data.rows.forEach((row) => {
-        const tr = document.createElement('tr');
-        data.columns.forEach((col) => {
-          const td = document.createElement('td');
-          const val = row[col];
-          td.textContent = val !== null && val !== undefined ? String(val) : 'NULL';
-          if (val === null || val === undefined) {
-            td.style.color = 'var(--vscode-descriptionForeground)';
-            td.style.fontStyle = 'italic';
-          }
-          tr.appendChild(td);
-        });
-        tbody.appendChild(tr);
-      });
-      document.getElementById('preview-row-count').textContent = data.rows.length;
-    }
-
-    window.addEventListener('message', (event) => {
-      const msg = event.data;
-      if (!msg) return;
-
-      if (msg.type === 'setState') {
-        if (msg.state === 'loading') {
-          document.getElementById('loading').style.display = 'block';
-          document.getElementById('error').style.display = 'none';
-          document.getElementById('content').style.display = 'none';
-        } else if (msg.state === 'error') {
-          document.getElementById('loading').style.display = 'none';
-          document.getElementById('error').style.display = 'block';
-          document.getElementById('error-message').textContent = msg.message || 'An error occurred.';
-          document.getElementById('content').style.display = 'none';
-        } else if (msg.state === 'idle') {
-          document.getElementById('loading').style.display = 'none';
-          document.getElementById('error').style.display = 'none';
-          document.getElementById('content').style.display = 'block';
-        }
-      } else if (msg.type === 'loadTableOverview') {
-        currentOverview = msg;
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('error').style.display = 'none';
-        document.getElementById('content').style.display = 'block';
-
-        document.getElementById('table-name').textContent = (msg.isView ? 'View ' : 'Table ') + msg.tableName;
-        const vBadge = document.getElementById('version-badge');
-        if (msg.isView) {
-          vBadge.textContent = 'VIEW (v' + msg.formatVersion + ')';
-          vBadge.className = 'badge';
-          vBadge.style.background = '#0284c7';
-          vBadge.style.color = '#fff';
-
-          // Views are metadata-only objects; querying and data previews are not applicable
-          document.getElementById('query-btn').style.display = 'none';
-          document.getElementById('view-dag-btn').style.display = 'none';
-          document.getElementById('item-current-snapshot').style.display = 'none';
-          document.getElementById('partition-section').style.display = 'none';
-          document.getElementById('tab-btn-preview').style.display = 'none';
-
-          document.getElementById('item-view-uuid').style.display = 'inline';
-          document.getElementById('view-uuid').textContent = msg.viewUuid || msg.tableUuid;
-          document.getElementById('item-current-version').style.display = 'inline';
-          document.getElementById('current-version').textContent = 'v' + (msg.currentVersionId ?? 1);
-
-          if (msg.defaultNamespace && msg.defaultNamespace.length > 0) {
-            document.getElementById('item-default-namespace').style.display = 'inline';
-            document.getElementById('default-namespace').textContent = msg.defaultNamespace.join('.');
-          } else {
-            document.getElementById('item-default-namespace').style.display = 'none';
-          }
-
-          if (msg.defaultCatalog) {
-            document.getElementById('item-default-catalog').style.display = 'inline';
-            document.getElementById('default-catalog').textContent = msg.defaultCatalog;
-          } else {
-            document.getElementById('item-default-catalog').style.display = 'none';
-          }
-
-          document.getElementById('tab-btn-sql').style.display = 'inline-block';
-          document.getElementById('tab-btn-snapshots').textContent = 'Versions & History';
-          document.getElementById('view-sql-code').textContent = msg.viewSql || 'No SQL definition available.';
-          document.getElementById('view-dialect-badge').textContent = (msg.viewDialect || 'sql').toUpperCase();
-
-          // If current tab is preview, switch to View SQL tab
-          const activeTabBtn = document.querySelector('.tab-btn.active');
-          if (activeTabBtn && activeTabBtn.getAttribute('data-tab') === 'preview') {
-            document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-            document.getElementById('tab-btn-sql').classList.add('active');
-            document.getElementById('tab-sql').classList.add('active');
-          }
-        } else {
-          vBadge.textContent = 'v' + msg.formatVersion;
-          vBadge.className = 'badge badge-v' + msg.formatVersion;
-          vBadge.style.background = '';
-          vBadge.style.color = '';
-
-          document.getElementById('query-btn').style.display = 'inline-flex';
-          document.getElementById('view-dag-btn').style.display = 'inline-flex';
-          document.getElementById('item-current-snapshot').style.display = 'inline';
-          document.getElementById('partition-section').style.display = 'block';
-          document.getElementById('tab-btn-preview').style.display = 'inline-block';
-
-          document.getElementById('item-view-uuid').style.display = 'none';
-          document.getElementById('item-current-version').style.display = 'none';
-          document.getElementById('item-default-namespace').style.display = 'none';
-          document.getElementById('item-default-catalog').style.display = 'none';
-
-          document.getElementById('tab-btn-sql').style.display = 'none';
-          document.getElementById('tab-btn-snapshots').textContent = 'Snapshots History';
-        }
-
-        document.getElementById('table-location').textContent = msg.location;
-        document.getElementById('current-snapshot').textContent = msg.currentSnapshotId || 'None';
-        document.getElementById('table-updated').textContent = msg.lastUpdatedMs ? new Date(msg.lastUpdatedMs).toLocaleString() : 'Unknown';
-
-        // Partition Spec
-        const pChips = document.getElementById('partition-chips');
-        pChips.innerHTML = '';
-        if (msg.partitionSpec && msg.partitionSpec.length > 0) {
-          msg.partitionSpec.forEach((p) => {
-            const chip = document.createElement('span');
-            chip.className = 'chip';
-            chip.textContent = \`\${p.name} (\${p.transform})\`;
-            pChips.appendChild(chip);
-          });
-        } else {
-          pChips.innerHTML = '<span style="color: var(--vscode-descriptionForeground); font-style: italic;">Unpartitioned</span>';
-        }
-
-        // Columns
-        allColumns = msg.columns || [];
-        renderColumns(allColumns);
-
-        // Properties
-        const pTbody = document.getElementById('properties-tbody');
-        pTbody.innerHTML = '';
-        const props = Object.entries(msg.properties || {});
-        if (props.length > 0) {
-          props.forEach(([k, v]) => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = \`<td style="font-family: monospace;">\${esc(k)}</td><td>\${esc(v)}</td>\`;
-            pTbody.appendChild(tr);
-          });
-          document.getElementById('properties-section').style.display = 'block';
-        } else {
-          document.getElementById('properties-section').style.display = 'none';
-        }
-
-        // Snapshots or View Versions
-        if (msg.isView && Array.isArray(msg.viewVersions) && msg.viewVersions.length > 0) {
-          allSnapshots = msg.viewVersions.map((v) => ({
-            snapshotId: 'v' + v.versionId,
-            parentSnapshotId: null,
-            timestampMs: v.timestampMs,
-            operation: (v.representations && v.representations[0]?.dialect) ? v.representations[0].dialect.toUpperCase() : 'VIEW',
-            addedRecords: undefined,
-            deletedRecords: undefined,
-            addedFiles: undefined,
-            manifestList: undefined,
-          }));
-        } else {
-          allSnapshots = msg.snapshots || [];
-        }
-        snapshotPage = 0;
-        renderSnapshots();
-
-      } else if (msg.type === 'loadDataPreview') {
-        currentPreview = msg;
-        renderPreview(msg);
-      }
-    });
-
-    function esc(s) {
-      if (!s) return '';
-      return String(s)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-    }
-  </script>
+  <script nonce="${nonce}" src="${scriptSrc}"></script>
 </body>
 </html>`;
 }
